@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Accessibility Audit Report - accessible_sample.pdf</title>
+    <style>
+        :root {
+            --bg: #f8fafc;
+            --surface: #ffffff;
+            --text: #0f172a;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+            --primary: #2563eb;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --info: #0284c7;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 2rem;
+            line-height: 1.5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header {
+            background: var(--surface);
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+            border: 1px solid var(--border);
+        }
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 1rem;
+            margin-bottom: 1rem;
+        }
+        h1 { margin: 0; font-size: 1.75rem; color: #1e293b; }
+        .score-circle {
+            width: 90px;
+            height: 90px;
+            border-radius: 50%;
+            border: 6px solid #f59e0b;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 1.4rem;
+            color: #f59e0b;
+        }
+        .score-label { font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; }
+        .meta-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        .meta-item { font-size: 0.9rem; }
+        .meta-item strong { color: var(--text-muted); display: block; font-size: 0.8rem; text-transform: uppercase; }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        .stat-card {
+            background: var(--surface);
+            padding: 1.25rem;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            text-align: center;
+        }
+        .stat-num { font-size: 2rem; font-weight: 700; margin: 0.25rem 0; }
+        .stat-pass { color: var(--success); }
+        .stat-warn { color: var(--warning); }
+        .stat-fail { color: var(--danger); }
+        .stat-manual { color: var(--info); }
+        .table-card {
+            background: var(--surface);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            font-size: 0.9rem;
+        }
+        th {
+            background: #f1f5f9;
+            padding: 0.85rem 1rem;
+            font-weight: 600;
+            color: #475569;
+            border-bottom: 1px solid var(--border);
+        }
+        td {
+            padding: 0.85rem 1rem;
+            border-bottom: 1px solid var(--border);
+            vertical-align: top;
+        }
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .badge-pass { background: #dcfce7; color: #166534; }
+        .badge-fail { background: #fee2e2; color: #991b1b; }
+        .badge-warn { background: #fef3c7; color: #92400e; }
+        .badge-manual { background: #e0f2fe; color: #075985; }
+        .badge-error { background: #f3e8ff; color: #6b21a8; }
+        .msg-box { font-weight: 500; margin-bottom: 0.35rem; }
+        .evidence-box {
+            background: #f8fafc;
+            padding: 0.4rem 0.6rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            margin-bottom: 0.35rem;
+            border-left: 3px solid #cbd5e1;
+        }
+        .remediation-box {
+            background: #f0fdf4;
+            padding: 0.4rem 0.6rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            color: #166534;
+            border-left: 3px solid #86efac;
+        }
+        .filter-bar {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            align-items: center;
+        }
+        .filter-btn {
+            padding: 0.4rem 0.8rem;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: var(--surface);
+            cursor: pointer;
+            font-size: 0.85rem;
+        }
+        .filter-btn.active {
+            background: var(--primary);
+            color: #ffffff;
+            border-color: var(--primary);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-top">
+                <div>
+                    <h1>PDF Accessibility Audit Report</h1>
+                    <div style="color: var(--text-muted); font-size: 0.95rem; margin-top: 0.25rem;">
+                        Generated by <strong>PDF Accessibility Inspector</strong> on 2026-09-29 13:22:08
+                    </div>
+                </div>
+                <div class="score-circle">
+                    89.5%
+                    <span class="score-label">Score</span>
+                </div>
+            </div>
+            <div class="meta-grid">
+                <div class="meta-item"><strong>Document File</strong>accessible_sample.pdf</div>
+                <div class="meta-item"><strong>Document Title</strong>Annual Accessibility and Technology Report 2026</div>
+                <div class="meta-item"><strong>Pages / Size</strong>1 pages (72.8 KB)</div>
+                <div class="meta-item"><strong>PDF Version</strong>1.4</div>
+                <div class="meta-item"><strong>Language</strong>en-US</div>
+                <div class="meta-item"><strong>Tagged PDF</strong>Yes</div>
+                <div class="meta-item"><strong>PDF/UA Declared</strong>Yes</div>
+            </div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-num stat-pass">34</div>
+                <div class="stat-label">Passed Checks</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-num stat-warn">4</div>
+                <div class="stat-label">Warnings</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-num stat-fail">0</div>
+                <div class="stat-label">Failed Issues</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-num stat-manual">1</div>
+                <div class="stat-label">Manual Review</div>
+            </div>
+        </div>
+
+        <div class="table-card">
+            <div style="padding: 1rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
+                <h3 style="margin: 0;">Audit Findings Details</h3>
+                <div class="filter-bar">
+                    <button class="filter-btn active" onclick="filterFindings('ALL')">All (39)</button>
+                    <button class="filter-btn" onclick="filterFindings('FAIL')">Failures (0)</button>
+                    <button class="filter-btn" onclick="filterFindings('WARNING')">Warnings (4)</button>
+                    <button class="filter-btn" onclick="filterFindings('PASS')">Passed (34)</button>
+                </div>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 100px;">Status</th>
+                        <th style="width: 130px;">Check ID</th>
+                        <th>Checkpoint / Category</th>
+                        <th style="width: 90px;">Standard</th>
+                        <th style="width: 70px;">Page</th>
+                        <th>Evidence & Remediation</th>
+                    </tr>
+                </thead>
+                <tbody id="findingsBody">
+                    
+            <tr class="finding-row" data-status="PASS" data-standard="PDF/UA">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>PDFUA-SYNTAX-001</code></td>
+                <td><strong>PDF Syntax (ISO 32000-1) Core</strong><br><small class="text-muted">PDF Syntax (ISO 32000-1)</small></td>
+                <td>PDF/UA</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">PDF version 1.4 supports standard accessibility features.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>PDF Version: 1.4</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Ensure the PDF is created with compliant PDF 1.7 or 2.0 specifications without syntax corruption.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="PDF/UA">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>PDFUA-SYNTAX-001</code></td>
+                <td><strong>PDF Syntax (ISO 32000-1) Core</strong><br><small class="text-muted">PDF Syntax (ISO 32000-1)</small></td>
+                <td>PDF/UA</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">Document is not encrypted; accessibility content extraction is unrestricted.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Encryption: None</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Ensure the PDF is created with compliant PDF 1.7 or 2.0 specifications without syntax corruption.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="PDF/UA">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>PDFUA-FONT-001</code></td>
+                <td><strong>Fonts Embedded</strong><br><small class="text-muted">Fonts</small></td>
+                <td>PDF/UA</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">All 3 font(s) in the document are embedded.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Total embedded fonts: 3</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Embed all fonts when exporting the PDF from your authoring tool (e.g. Word, InDesign) or in Adobe Acrobat Preflight.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="WARNING" data-standard="PDF/UA">
+                <td><span class="badge badge-warn">WARNING</span></td>
+                <td><code>PDFUA-FONT-002</code></td>
+                <td><strong>ToUnicode CMaps</strong><br><small class="text-muted">Fonts</small></td>
+                <td>PDF/UA</td>
+                <td>1</td>
+                <td>
+                    <div class="msg-box">Font &#x27;AAAAAA+Arial-BoldMT&#x27; lacks an explicit /ToUnicode mapping stream.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Font: AAAAAA+Arial-BoldMT, Encoding: , Pages: [1]</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Convert font to OpenType/TrueType with explicit Unicode mappings before exporting to PDF.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="WARNING" data-standard="PDF/UA">
+                <td><span class="badge badge-warn">WARNING</span></td>
+                <td><code>PDFUA-FONT-002</code></td>
+                <td><strong>ToUnicode CMaps</strong><br><small class="text-muted">Fonts</small></td>
+                <td>PDF/UA</td>
+                <td>1</td>
+                <td>
+                    <div class="msg-box">Font &#x27;AAAAAA+ArialMT&#x27; lacks an explicit /ToUnicode mapping stream.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Font: AAAAAA+ArialMT, Encoding: , Pages: [1]</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Convert font to OpenType/TrueType with explicit Unicode mappings before exporting to PDF.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="PDF/UA">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>PDFUA-CONTENT-001</code></td>
+                <td><strong>Tagged PDF</strong><br><small class="text-muted">Content</small></td>
+                <td>PDF/UA</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">Document is explicitly marked as a Tagged PDF with a structure tree.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Catalog/MarkInfo/Marked is true and StructTreeRoot exists.</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> In Acrobat Pro, open Accessibility tool and select &#x27;Add Tags to Document&#x27;, or check &#x27;Document is tagged PDF&#x27; in Word/InDesign export settings.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="PDF/UA">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>PDFUA-CONTENT-002</code></td>
+                <td><strong>Real Content Tagged</strong><br><small class="text-muted">Content</small></td>
+                <td>PDF/UA</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">All pages with text content are associated with the structure tree.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Total pages checked: 1</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Inspect untagged elements in the PDF structure pane and tag them or mark them as background artifacts.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="PDF/UA">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>PDFUA-EMBEDDED-001</code></td>
+                <td><strong>Embedded Files</strong><br><small class="text-muted">Embedded Files</small></td>
+                <td>PDF/UA</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">No non-conforming embedded files detected in the document.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Embedded files check passed.</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Ensure attached files are in accessible formats or provide an accessible alternative description.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="PDF/UA">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>PDFUA-LANG-001</code></td>
+                <td><strong>Document Language</strong><br><small class="text-muted">Natural language</small></td>
+                <td>PDF/UA</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">Document primary natural language is specified as &#x27;en-US&#x27;.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>/Lang: &#x27;en-US&#x27;</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> In Adobe Acrobat Pro, open File &gt; Properties &gt; Advanced &gt; Reading Options, and select the correct Language (e.g. English US).</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="PDF/UA">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>PDFUA-LANG-002</code></td>
+                <td><strong>Language Shifts</strong><br><small class="text-muted">Natural language</small></td>
+                <td>PDF/UA</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">All 0 element-level language override(s) have valid BCP 47 codes.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Language shifts syntax validated.</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Select the foreign-language text span in Acrobat Pro&#x27;s Tag Tree, open Properties, and set the Language attribute.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="PDF/UA">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>PDFUA-TREE-001</code></td>
+                <td><strong>Structure Tree Root</strong><br><small class="text-muted">Structure tree</small></td>
+                <td>PDF/UA</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">Structure tree has a compliant top-level structural container.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Top-level tag(s): [&#x27;DOCUMENT&#x27;]</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Ensure the root of the structure tree is tagged as Document or Part in Acrobat Pro Tag Tree.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="PDF/UA">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>PDFUA-STRUCT-001</code></td>
+                <td><strong>Structure Elements Nesting</strong><br><small class="text-muted">Structure Elements</small></td>
+                <td>PDF/UA</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">All structural lists, tables, and container elements conform to standard nesting rules.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Nesting validation passed.</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Fix nesting in the Tag Tree so lists contain LI, tables contain TR, and TR contains TH/TD.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="WARNING" data-standard="PDF/UA">
+                <td><span class="badge badge-warn">WARNING</span></td>
+                <td><code>PDFUA-STRUCT-002</code></td>
+                <td><strong>Empty Structure Elements</strong><br><small class="text-muted">Structure Elements</small></td>
+                <td>PDF/UA</td>
+                <td>1</td>
+                <td>
+                    <div class="msg-box">Empty structure element &lt;H1&gt; has no child tags or marked content.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>&lt;H1&gt; on page 1 is empty.</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Remove empty tags in the tag tree.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="PDF/UA">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>PDFUA-ROLE-001</code></td>
+                <td><strong>Role Mapping</strong><br><small class="text-muted">Role mapping</small></td>
+                <td>PDF/UA</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">All custom structure types are properly mapped to standard structure types.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>RoleMap size: 1</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Open the Role Map in Acrobat Pro (Tags Panel &gt; Options &gt; Edit Role Map) and map custom tags to standard PDF tags.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="PDF/UA">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>PDFUA-ALT-001</code></td>
+                <td><strong>Alternative Descriptions</strong><br><small class="text-muted">Alternative Descriptions</small></td>
+                <td>PDF/UA</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">No graphical figures or formulas found in the document.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Graphic elements count: 0</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> In Acrobat Pro, right-click Figure tag &gt; Properties &gt; Tag tab &gt; Alternative Text, and enter a descriptive alternative.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="PDF/UA">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>PDFUA-META-001</code></td>
+                <td><strong>Metadata</strong><br><small class="text-muted">Metadata</small></td>
+                <td>PDF/UA</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">XMP metadata stream is present.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Catalog/Metadata exists.</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> In Adobe Acrobat Pro, open File &gt; Properties &gt; Description, enter a Title, and in Preflight run &#x27;Fix PDF/UA identifier&#x27;.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="PDF/UA">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>PDFUA-META-001</code></td>
+                <td><strong>Metadata</strong><br><small class="text-muted">Metadata</small></td>
+                <td>PDF/UA</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">Document Title is defined: &#x27;Annual Accessibility and Technology Report 2026&#x27;.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Title: &#x27;Annual Accessibility and Technology Report 2026&#x27;</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> In Adobe Acrobat Pro, open File &gt; Properties &gt; Description, enter a Title, and in Preflight run &#x27;Fix PDF/UA identifier&#x27;.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="PDF/UA">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>PDFUA-META-001</code></td>
+                <td><strong>Metadata</strong><br><small class="text-muted">Metadata</small></td>
+                <td>PDF/UA</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">Document declares PDF/UA compliance (Part 1).</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>pdfuaid:part found in XMP metadata.</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> In Adobe Acrobat Pro, open File &gt; Properties &gt; Description, enter a Title, and in Preflight run &#x27;Fix PDF/UA identifier&#x27;.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="PDF/UA">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>PDFUA-SETTINGS-001</code></td>
+                <td><strong>Document settings</strong><br><small class="text-muted">Document settings</small></td>
+                <td>PDF/UA</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">DisplayDocTitle is set to true in ViewerPreferences.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>ViewerPreferences/DisplayDocTitle is true.</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> In Acrobat Pro, open File &gt; Properties &gt; Initial View, and under &#x27;Window Options&#x27; set &#x27;Show&#x27; to &#x27;Document Title&#x27; instead of &#x27;File Name&#x27;.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="PDF/UA">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>PDFUA-SETTINGS-001</code></td>
+                <td><strong>Document settings</strong><br><small class="text-muted">Document settings</small></td>
+                <td>PDF/UA</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">Page tab navigation conforms to document structure order.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Tab order is set to Structure (/Tabs /S) across pages.</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> In Acrobat Pro, open File &gt; Properties &gt; Initial View, and under &#x27;Window Options&#x27; set &#x27;Show&#x27; to &#x27;Document Title&#x27; instead of &#x27;File Name&#x27;.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="WCAG">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>WCAG-1.1.1</code></td>
+                <td><strong>1.1 Text Alternatives</strong><br><small class="text-muted">1.1 Text Alternatives</small></td>
+                <td>WCAG</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">No non-text content (images, figures) found in the document.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Image count: 0</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Add descriptive alternative text to all non-decorative images and figures.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="WCAG">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>WCAG-1.2</code></td>
+                <td><strong>1.2 Time-based Media</strong><br><small class="text-muted">1.2 Time-based Media</small></td>
+                <td>WCAG</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">No time-based multimedia or audio/video streams detected.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>No media annotations found.</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Provide synchronized captions or text transcripts for embedded media.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="WCAG">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>WCAG-1.3</code></td>
+                <td><strong>1.3 Adaptable</strong><br><small class="text-muted">1.3 Adaptable</small></td>
+                <td>WCAG</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">Document contains 1 structured heading element(s).</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Heading tags count: 1</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Ensure headings, tables, and lists use appropriate structural tags.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="MANUAL REVIEW" data-standard="WCAG">
+                <td><span class="badge badge-manual">MANUAL REVIEW</span></td>
+                <td><code>WCAG-1.4</code></td>
+                <td><strong>1.4 Distinguishable</strong><br><small class="text-muted">1.4 Distinguishable</small></td>
+                <td>WCAG</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">Verify color contrast (minimum 4.5:1 for normal text, 3:1 for large text) and ensure color is not the only means of conveying information.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Color contrast requires visual sampling or human verification.</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Verify visual contrast of text against background meets 4.5:1 for regular text and 3:1 for large text.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="WCAG">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>WCAG-2.1</code></td>
+                <td><strong>2.1 Keyboard Accessible</strong><br><small class="text-muted">2.1 Keyboard Accessible</small></td>
+                <td>WCAG</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">Document has no interactive controls or links requiring tab navigation.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>No links or form widgets detected.</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Ensure page tab navigation follows document structure order.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="WCAG">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>WCAG-2.2</code></td>
+                <td><strong>2.2 Enough Time</strong><br><small class="text-muted">2.2 Enough Time</small></td>
+                <td>WCAG</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">No timed transitions, automated page flips, or timeouts detected.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Static document presentation.</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Do not set automated timeouts or slide transitions without user pause controls.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="WCAG">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>WCAG-2.3</code></td>
+                <td><strong>2.3 Seizures and Physical Reactions</strong><br><small class="text-muted">2.3 Seizures and Physical Reactions</small></td>
+                <td>WCAG</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">No flashing or rapid animated content detected in the document.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>No flashing multimedia streams found.</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Avoid animations or blinking content that flashes more than three times in any one-second period.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="WCAG">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>WCAG-2.4</code></td>
+                <td><strong>2.4 Navigable</strong><br><small class="text-muted">2.4 Navigable</small></td>
+                <td>WCAG</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">Document has a descriptive title: &#x27;Annual Accessibility and Technology Report 2026&#x27;.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Title: &#x27;Annual Accessibility and Technology Report 2026&#x27;</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Set document title, provide bookmarks for long documents, and write descriptive link text.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="WCAG">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>WCAG-2.5</code></td>
+                <td><strong>2.5 Input Modalities</strong><br><small class="text-muted">2.5 Input Modalities</small></td>
+                <td>WCAG</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">No input modality conflicts detected with touch or pointer gestures.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Form and link modalities verified.</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Ensure visible text labels match accessible names.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="WCAG">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>WCAG-3.1</code></td>
+                <td><strong>3.1 Readable</strong><br><small class="text-muted">3.1 Readable</small></td>
+                <td>WCAG</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">Language of document is specified as &#x27;en-US&#x27;.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Document language: en-US</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Set default document language and mark language switches.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="WCAG">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>WCAG-3.2</code></td>
+                <td><strong>3.2 Predictable</strong><br><small class="text-muted">3.2 Predictable</small></td>
+                <td>WCAG</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">Interactive fields and links operate predictably without unexpected context changes.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Action triggers conform to standard behavior.</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Avoid automated submit actions or context jumps when form fields receive focus.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="WCAG">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>WCAG-3.3</code></td>
+                <td><strong>3.3 Input Assistance</strong><br><small class="text-muted">3.3 Input Assistance</small></td>
+                <td>WCAG</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">No interactive form fields found in document.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Form fields count: 0</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Provide clear tooltips (/TU) or accessible labels for all interactive form fields.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="WCAG">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>WCAG-4.1</code></td>
+                <td><strong>4.1 Compatible</strong><br><small class="text-muted">4.1 Compatible</small></td>
+                <td>WCAG</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">Document semantic tagging and extraction permissions are compatible with assistive technology.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Tagged PDF with accessibility permissions enabled.</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Ensure all interactive elements have accessible names and standard structural roles.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="Quality">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>QUAL-HEAD-001</code></td>
+                <td><strong>Heading Hierarchy Integrity</strong><br><small class="text-muted">Heading Structure</small></td>
+                <td>Quality</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">Heading hierarchy is logically consistent across all 1 heading(s).</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Headings validated: 1</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Adjust heading levels in your authoring tool so they increment smoothly without skipping levels.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="Quality">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>QUAL-TABLE-001</code></td>
+                <td><strong>Table Regularity &amp; Symmetry</strong><br><small class="text-muted">Table Quality</small></td>
+                <td>Quality</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">No data tables found in document.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Tables count: 0</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Ensure table cells align evenly and provide descriptive column and row headers.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="Quality">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>QUAL-LINK-001</code></td>
+                <td><strong>Meaningful Link Labels</strong><br><small class="text-muted">Link Quality</small></td>
+                <td>Quality</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">No hyperlinks found in document.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Links count: 0</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Replace vague labels like &#x27;click here&#x27; or bare URLs with clear descriptions of the destination.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="AI">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>AI-ALT-001</code></td>
+                <td><strong>Alt-Text Semantic Quality</strong><br><small class="text-muted">AI Alt-Text Evaluation</small></td>
+                <td>AI</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">No figures present requiring AI semantic evaluation.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Figure count: 0</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Write concise, descriptive alt text that explains what the image illustrates without saying &#x27;image of&#x27; or &#x27;graphic of&#x27;.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="WARNING" data-standard="AI">
+                <td><span class="badge badge-warn">WARNING</span></td>
+                <td><code>AI-READ-001</code></td>
+                <td><strong>Cognitive Readability Score</strong><br><small class="text-muted">Cognitive Accessibility</small></td>
+                <td>AI</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">Flesch Reading Ease score: 0.0/100 (Very Complex / Specialized). Avg sentence length: 19.5 words.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Words: 39, Sentences: 2, Syllables: 93, Reading Score: 0.0</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Simplify sentence structures and reduce jargon where possible for broad audience comprehension.</div>
+                </td>
+            </tr>
+            
+            <tr class="finding-row" data-status="PASS" data-standard="AI">
+                <td><span class="badge badge-pass">PASS</span></td>
+                <td><code>AI-OUTLINE-001</code></td>
+                <td><strong>Structural Outline Consistency</strong><br><small class="text-muted">Structural AI</small></td>
+                <td>AI</td>
+                <td><span class="text-muted">Doc</span></td>
+                <td>
+                    <div class="msg-box">Document structural outline and navigation elements are well-proportioned.</div>
+                    <div class="evidence-box"><strong>Evidence:</strong> <code>Bookmarks: 0, Pages: 1</code></div>
+                    <div class="remediation-box"><strong>Remediation:</strong> Synchronize document bookmarks with the heading hierarchy.</div>
+                </td>
+            </tr>
+            
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        function filterFindings(status) {
+            document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+
+            const rows = document.querySelectorAll('.finding-row');
+            rows.forEach(row => {
+                if (status === 'ALL' || row.getAttribute('data-status') === status) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        }
+    </script>
+</body>
+</html>
