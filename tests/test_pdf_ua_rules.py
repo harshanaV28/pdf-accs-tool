@@ -85,3 +85,88 @@ def test_wcag_text_alternatives():
     img_alt = ImageModel("img2", 1, (10, 10, 100, 100), 200, 200, "RGB", has_alt=True, alt_text="Bar chart showing growth")
     doc_good = PDFDocumentModel(filepath="", filename="i.pdf", filesize=10, pdf_version="1.7", page_count=1, images=[img_alt])
     assert rule.evaluate(doc_good)[0].status == CheckStatus.PASS
+
+
+def test_parent_tree_integrity_rule():
+    from src.pdf_inspector.engine.pdf_ua.parent_tree_rules import ParentTreeIntegrityRule
+    rule = ParentTreeIntegrityRule()
+
+    # Case 1: Tagged but missing ParentTree
+    tree = StructureNode("root", "StructTreeRoot", "StructTreeRoot")
+    doc_no_pt = PDFDocumentModel(
+        filepath="", filename="p.pdf", filesize=10, pdf_version="1.7", page_count=1,
+        is_tagged=True, structure_tree=tree, has_parent_tree=False
+    )
+    assert any(r.status == CheckStatus.FAIL for r in rule.evaluate(doc_no_pt))
+
+    # Case 2: Tagged with valid ParentTree
+    doc_with_pt = PDFDocumentModel(
+        filepath="", filename="p.pdf", filesize=10, pdf_version="1.7", page_count=1,
+        is_tagged=True, structure_tree=tree, has_parent_tree=True, parent_tree_valid=True,
+        parent_tree_entries_count=2
+    )
+    assert any(r.status == CheckStatus.PASS for r in rule.evaluate(doc_with_pt))
+
+
+def test_artifact_in_structure_tree_rule():
+    from src.pdf_inspector.engine.pdf_ua.artifact_rules import ArtifactInStructureTreeRule
+    rule = ArtifactInStructureTreeRule()
+
+    # Case 1: Artifact tag erroneously inside structure tree
+    art_node = StructureNode("art1", "Artifact", "Artifact")
+    tree_bad = StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[art_node])
+    doc_bad = PDFDocumentModel(
+        filepath="", filename="a.pdf", filesize=10, pdf_version="1.7", page_count=1,
+        is_tagged=True, structure_tree=tree_bad
+    )
+    assert any(r.status == CheckStatus.FAIL for r in rule.evaluate(doc_bad))
+
+    # Case 2: Clean structure tree with no Artifact tags
+    p_node = StructureNode("p1", "P", "P")
+    tree_good = StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[p_node])
+    doc_good = PDFDocumentModel(
+        filepath="", filename="a.pdf", filesize=10, pdf_version="1.7", page_count=1,
+        is_tagged=True, structure_tree=tree_good
+    )
+    assert any(r.status == CheckStatus.PASS for r in rule.evaluate(doc_good))
+
+
+def test_annotation_tagged_rule():
+    from src.pdf_inspector.engine.pdf_ua.annotation_rules import AnnotationTaggedRule
+    from src.pdf_inspector.core.models import AnnotationModel
+    rule = AnnotationTaggedRule()
+
+    # Case 1: Untagged link annotation
+    ann_bad = AnnotationModel(id="ann1", page=1, subtype="Link", rect=(10, 10, 100, 30), is_tagged=False)
+    doc_bad = PDFDocumentModel(
+        filepath="", filename="ann.pdf", filesize=10, pdf_version="1.7", page_count=1,
+        is_tagged=True, annotations=[ann_bad]
+    )
+    assert any(r.status == CheckStatus.FAIL for r in rule.evaluate(doc_bad))
+
+    # Case 2: Tagged link annotation
+    ann_good = AnnotationModel(id="ann2", page=1, subtype="Link", rect=(10, 10, 100, 30), is_tagged=True)
+    doc_good = PDFDocumentModel(
+        filepath="", filename="ann.pdf", filesize=10, pdf_version="1.7", page_count=1,
+        is_tagged=True, annotations=[ann_good]
+    )
+    assert any(r.status == CheckStatus.PASS for r in rule.evaluate(doc_good))
+
+
+def test_metadata_completeness_rule():
+    rule = MetadataCompletenessRule()
+
+    # Missing Title
+    doc_notitle = PDFDocumentModel(
+        filepath="", filename="m.pdf", filesize=10, pdf_version="1.7", page_count=1,
+        title=None
+    )
+    assert any(r.status == CheckStatus.FAIL and "Title" in r.message for r in rule.evaluate(doc_notitle))
+
+    # Fully populated metadata with PDF/UA declaration
+    doc_complete = PDFDocumentModel(
+        filepath="", filename="m.pdf", filesize=10, pdf_version="1.7", page_count=1,
+        title="Valid Accessibility Report", author="Audit Team", subject="Auditing",
+        pdfua_identifier_present=True
+    )
+    assert any(r.status == CheckStatus.PASS for r in rule.evaluate(doc_complete))

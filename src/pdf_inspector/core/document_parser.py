@@ -1,11 +1,11 @@
 """
 PDF Document Parser
-Combines pikepdf (deep PDF structural dictionary inspection) and pymupdf
-(high-speed rendering, text extraction, visual bounding boxes) into a unified
-PDFDocumentModel.
+Combines pikepdf (deep PDF structural dictionary inspection, StructTreeRoot, ParentTree)
+and pymupdf (high-speed rendering, text extraction, visual bounding boxes, annotations)
+into a unified, exhaustive PDFDocumentModel.
 """
 
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Set
 import os
 import re
 import logging
@@ -14,11 +14,16 @@ import pymupdf
 
 from .models import (
     PDFDocumentModel, PageModel, StructureNode, FontModel,
-    ImageModel, TableModel, LinkModel, FormFieldModel, BookmarkModel
+    ImageModel, TableModel, ListModel, LinkModel, FormFieldModel,
+    AnnotationModel, BookmarkModel
 )
-from .structure_tree import StructureTreeParser, resolve_role
+from .structure_tree import StructureTreeParser, resolve_role, parse_number_tree
 
 logger = logging.getLogger(__name__)
+
+# Regex for parsing marked content sequences in PDF content streams
+MCID_PATTERN = re.compile(r"/(\w+)\s*<<\s*[^>]*?/MCID\s+(\d+)[^>]*?>>\s*BDC", re.DOTALL)
+ARTIFACT_PATTERN = re.compile(r"/Artifact(?:\s*<<[^>]*?>>)?\s*B[DM]C", re.DOTALL)
 
 
 class DocumentParser:
@@ -31,8 +36,29 @@ class DocumentParser:
 
     def parse(self) -> PDFDocumentModel:
         """Executes full document extraction."""
-        pike_doc = pikepdf.open(self.filepath)
-        fitz_doc = pymupdf.open(self.filepath)
+        if not os.path.exists(self.filepath):
+            raise FileNotFoundError(f"PDF file does not exist: {self.filepath}")
+
+        try:
+            pike_doc = pikepdf.open(self.filepath)
+        except pikepdf.PasswordError:
+            raise PermissionError(f"PDF '{self.filename}' is encrypted and password-protected. Please unlock the PDF before inspecting.")
+        except pikepdf.PdfError as pe:
+            raise ValueError(f"PDF '{self.filename}' is corrupt or malformed: {pe}")
+        except Exception as e:
+            raise RuntimeError(f"Failed to open PDF '{self.filename}': {e}")
+
+        try:
+            fitz_doc = pymupdf.open(self.filepath)
+            if fitz_doc.needs_pass:
+                pike_doc.close()
+                fitz_doc.close()
+                raise PermissionError(f"PDF '{self.filename}' is encrypted and requires a password to view.")
+        except PermissionError:
+            raise
+        except Exception as e:
+            pike_doc.close()
+            raise ValueError(f"Failed to render PDF '{self.filename}': {e}")
 
         try:
             # 1. Basic Document Information
@@ -76,7 +102,6 @@ class DocumentParser:
             allows_extraction = True
             if is_encrypted:
                 try:
-                    # Check accessibility extraction bit in permissions
                     allows_extraction = fitz_doc.permissions & pymupdf.PDF_PERM_ACCESSIBILITY != 0
                 except Exception:
                     allows_extraction = True
@@ -98,13 +123,11 @@ class DocumentParser:
                     meta_bytes = bytes(pike_doc.Root.Metadata.read_bytes())
                     meta_str = meta_bytes.decode("utf-8", errors="ignore")
 
-                    # Check for Dublin Core title in XMP if not found in Info
                     if not title:
                         m_title = re.search(r"<dc:title>.*?<rdf:li[^>]*>(.*?)</rdf:li>", meta_str, re.DOTALL | re.IGNORECASE)
                         if m_title:
                             title = m_title.group(1).strip()
 
-                    # Check for PDF/UA identifier: <pdfuaid:part>1</pdfuaid:part>
                     m_part = re.search(r"<pdfuaid:part>(\d+)</pdfuaid:part>", meta_str, re.IGNORECASE)
                     if m_part:
                         pdfua_identifier_present = True
@@ -115,13 +138,26 @@ class DocumentParser:
                 except Exception as e:
                     logger.debug(f"Failed parsing XMP stream: {e}")
 
-            # RoleMap
+            # ParentTree & RoleMap
+            has_parent_tree = False
+            parent_tree_valid = False
+            parent_tree_entries_count = 0
             role_map: Dict[str, str] = {}
+
             if "/StructTreeRoot" in pike_doc.Root:
                 struct_root = pike_doc.Root["/StructTreeRoot"]
                 if "/RoleMap" in struct_root and isinstance(struct_root["/RoleMap"], pikepdf.Dictionary):
                     for custom_tag, mapped_tag in struct_root["/RoleMap"].items():
                         role_map[str(custom_tag).strip("/")] = str(mapped_tag).strip("/")
+
+                if "/ParentTree" in struct_root:
+                    has_parent_tree = True
+                    try:
+                        pt_entries = parse_number_tree(struct_root["/ParentTree"])
+                        parent_tree_entries_count = len(pt_entries)
+                        parent_tree_valid = parent_tree_entries_count > 0
+                    except Exception as e:
+                        logger.debug(f"Error parsing ParentTree: {e}")
 
             # Page mapping for Structure Tree
             page_map = {}
@@ -129,28 +165,70 @@ class DocumentParser:
                 if hasattr(p, "objgen"):
                     page_map[p.objgen] = idx
 
-            # 2. Extract Pages
+            # 2. Extract Pages with MCIDs and geometry
             pages: List[PageModel] = []
+            page_mcid_data: Dict[int, Dict[int, Tuple[str, Tuple[float, float, float, float]]]] = {}
+
             for page_idx in range(1, page_count + 1):
                 fitz_page = fitz_doc[page_idx - 1]
                 rect = fitz_page.rect
                 rotation = fitz_page.rotation
                 text = fitz_page.get_text("text")
 
-                # Check Tab order on page dictionary
+                # Check Tab order and StructParents on page dictionary
                 tab_mode = "Unspecified"
                 has_tab = False
+                struct_parents_id = None
+                mcids_found: List[int] = []
+                mcid_bboxes: Dict[int, Tuple[float, float, float, float]] = {}
+                mcid_texts: Dict[int, str] = {}
+
                 try:
                     pike_page = pike_doc.pages[page_idx - 1]
                     if "/Tabs" in pike_page:
                         has_tab = True
                         tab_mode = str(pike_page["/Tabs"]).strip("/")
-                except Exception:
-                    pass
+
+                    if "/StructParents" in pike_page:
+                        struct_parents_id = int(pike_page["/StructParents"])
+
+                    # Parse MCIDs from page contents stream
+                    if "/Contents" in pike_page:
+                        contents_obj = pike_page["/Contents"]
+                        raw_stream = b""
+                        if isinstance(contents_obj, pikepdf.Array):
+                            for stream_part in contents_obj:
+                                if hasattr(stream_part, "read_bytes"):
+                                    raw_stream += stream_part.read_bytes() + b"\n"
+                        elif hasattr(contents_obj, "read_bytes"):
+                            raw_stream = contents_obj.read_bytes()
+
+                        stream_text = raw_stream.decode("latin1", errors="ignore")
+                        for match in MCID_PATTERN.finditer(stream_text):
+                            mcid_num = int(match.group(2))
+                            if mcid_num not in mcids_found:
+                                mcids_found.append(mcid_num)
+
+                except Exception as e:
+                    logger.debug(f"Error checking page dictionary: {e}")
 
                 # Image and link counts
                 img_list = fitz_page.get_images()
                 links_list = fitz_page.get_links()
+
+                # Map text blocks to bounding boxes as approximation for MCIDs if not strictly split
+                blocks = fitz_page.get_text("blocks")
+                for idx, b in enumerate(blocks):
+                    # b: (x0, y0, x1, y1, text, block_no, block_type)
+                    if idx < len(mcids_found):
+                        target_mcid = mcids_found[idx]
+                        mcid_bboxes[target_mcid] = (b[0], b[1], b[2], b[3])
+                        mcid_texts[target_mcid] = b[4].strip()
+
+                page_mcid_data[page_idx] = {
+                    mcid: (mcid_texts.get(mcid, ""), mcid_bboxes.get(mcid, (0, 0, 0, 0)))
+                    for mcid in mcids_found
+                }
 
                 pages.append(PageModel(
                     page_number=page_idx,
@@ -162,11 +240,15 @@ class DocumentParser:
                     links_count=len(links_list),
                     has_structure=is_tagged,
                     has_tab_order=has_tab,
-                    tab_order_mode=tab_mode
+                    tab_order_mode=tab_mode,
+                    struct_parents_id=struct_parents_id,
+                    mcids=mcids_found,
+                    mcid_bboxes=mcid_bboxes,
+                    mcid_texts=mcid_texts
                 ))
 
             # 3. Structure Tree
-            tree_parser = StructureTreeParser(pike_doc, role_map, page_map)
+            tree_parser = StructureTreeParser(pike_doc, role_map, page_map, page_mcid_data)
             structure_tree = tree_parser.parse()
 
             # 4. Extract Fonts
@@ -178,13 +260,19 @@ class DocumentParser:
             # 6. Extract Tables
             tables = self._extract_tables(structure_tree)
 
-            # 7. Extract Links
+            # 7. Extract Lists (<L>)
+            lists = self._extract_lists(structure_tree)
+
+            # 8. Extract Links
             links = self._extract_links(fitz_doc, structure_tree)
 
-            # 8. Extract Form Fields
+            # 9. Extract Form Fields
             form_fields = self._extract_form_fields(fitz_doc, pike_doc)
 
-            # 9. Extract Bookmarks
+            # 10. Extract Annotations
+            annotations = self._extract_annotations(fitz_doc, pike_doc, structure_tree)
+
+            # 11. Extract Bookmarks
             bookmarks = self._extract_bookmarks(fitz_doc)
 
             return PDFDocumentModel(
@@ -209,14 +297,19 @@ class DocumentParser:
                 xmp_metadata_present=xmp_metadata_present,
                 pdfua_identifier_present=pdfua_identifier_present,
                 pdfua_part=pdfua_part,
+                has_parent_tree=has_parent_tree,
+                parent_tree_valid=parent_tree_valid,
+                parent_tree_entries_count=parent_tree_entries_count,
                 role_map=role_map,
                 pages=pages,
                 structure_tree=structure_tree,
                 fonts=fonts,
                 images=images,
                 tables=tables,
+                lists=lists,
                 links=links,
                 form_fields=form_fields,
+                annotations=annotations,
                 bookmarks=bookmarks,
                 raw_metadata=doc_info
             )
@@ -232,7 +325,6 @@ class DocumentParser:
             page = fitz_doc[page_idx]
             font_list = page.get_fonts(full=True)
             for f in font_list:
-                # f is (xref, ext, type, basefont, name, encoding)
                 basefont = f[3] if len(f) > 3 else "Unknown"
                 subtype = f[2] if len(f) > 2 else "Unknown"
                 encoding = f[5] if len(f) > 5 else "Custom"
@@ -242,7 +334,6 @@ class DocumentParser:
                 is_embedded = False
                 has_tounicode = False
 
-                # Query pikepdf object for exact descriptor details
                 try:
                     if xref and xref in pike_doc.objects:
                         font_obj = pike_doc.objects[xref]
@@ -277,7 +368,7 @@ class DocumentParser:
             for block in td.get("blocks", []):
                 for line in block.get("lines", []):
                     for span in line.get("spans", []):
-                        fn = span.get("font", "").lower().replace(" ", "")
+                        fn = span.get("font", "").lower().replace(" ", "").replace("-", "")
                         if fn:
                             used_font_names.add(fn)
 
@@ -285,7 +376,7 @@ class DocumentParser:
             if not used_font_names:
                 f.is_used = False
             else:
-                clean_base = f.name.lower().replace(" ", "")
+                clean_base = f.name.lower().replace(" ", "").replace("-", "")
                 if "+" in clean_base:
                     clean_base = clean_base.split("+")[-1]
                 f.is_used = any(clean_base in u or u in clean_base for u in used_font_names)
@@ -311,15 +402,14 @@ class DocumentParser:
                 height = img_info.get("height", 0)
                 cs = img_info.get("cs-name", "RGB")
 
-                # Match with Figure node if page matches
                 matched_node = None
                 for fn in figure_nodes:
                     if fn.page == page_num or fn.page is None:
                         matched_node = fn
                         break
 
-                has_alt = bool(matched_node and matched_node.alt_text and matched_node.alt_text.strip())
-                alt_val = matched_node.alt_text.strip() if (matched_node and matched_node.alt_text) else ""
+                has_alt = bool(matched_node and (matched_node.alt_text or matched_node.actual_text))
+                alt_val = (matched_node.alt_text or matched_node.actual_text or "").strip() if matched_node else ""
 
                 images.append(ImageModel(
                     id=f"img_p{page_num}_{img_info.get('xref', len(images))}",
@@ -368,6 +458,37 @@ class DocumentParser:
 
         return tables
 
+    def _extract_lists(self, struct_tree: Optional[StructureNode]) -> List[ListModel]:
+        """Extracts List (<L>) structural nodes and checks LI / Lbl / LBody nesting."""
+        lists: List[ListModel] = []
+        if not struct_tree:
+            return lists
+
+        list_nodes = struct_tree.find_all_by_standard_tag("L")
+        for idx, l_node in enumerate(list_nodes):
+            li_nodes = [c for c in l_node.children if c.standard_tag.upper() == "LI"]
+            has_labels = False
+            is_valid = len(li_nodes) == len(l_node.children) and len(li_nodes) > 0
+
+            for li in li_nodes:
+                child_tags = [c.standard_tag.upper() for c in li.children]
+                if "LBL" in child_tags:
+                    has_labels = True
+                # LI should contain only Lbl, LBody, or nested L
+                if not all(t in ("LBL", "LBODY", "L", "P", "SPAN") for t in child_tags):
+                    is_valid = False
+
+            lists.append(ListModel(
+                id=f"list_{idx + 1}",
+                page=l_node.page or 1,
+                items_count=len(li_nodes),
+                is_valid_structure=is_valid,
+                has_labels=has_labels,
+                bbox=l_node.bbox
+            ))
+
+        return lists
+
     def _extract_links(self, fitz_doc: pymupdf.Document, struct_tree: Optional[StructureNode]) -> List[LinkModel]:
         """Extracts links from page annotations and associates them with Link structure elements."""
         links: List[LinkModel] = []
@@ -383,14 +504,12 @@ class DocumentParser:
                 uri = l.get("uri", "")
                 page_dest = l.get("page", None)
                 if page_dest is not None:
-                    page_dest += 1  # 1-indexed
+                    page_dest += 1
 
-                # Extract visible text under this link rect
                 link_text = page.get_text("text", clip=rect).strip()
                 if not link_text and uri:
                     link_text = uri
 
-                # Check if matching structure tag exists
                 matched_node = next((ln for ln in link_nodes if ln.page == page_num), None)
 
                 links.append(LinkModel(
@@ -421,7 +540,6 @@ class DocumentParser:
                     tooltip = None
                     rect = (w.rect.x0, w.rect.y0, w.rect.x1, w.rect.y1) if w.rect else None
 
-                    # Retrieve /TU from low-level annotation dict
                     try:
                         if w.xref and w.xref in pike_doc.objects:
                             annot_obj = pike_doc.objects[w.xref]
@@ -442,9 +560,57 @@ class DocumentParser:
 
         return fields
 
+    def _extract_annotations(
+        self,
+        fitz_doc: pymupdf.Document,
+        pike_doc: pikepdf.Pdf,
+        struct_tree: Optional[StructureNode]
+    ) -> List[AnnotationModel]:
+        """Extracts all page annotations and checks if they are linked to the structure tree."""
+        annots: List[AnnotationModel] = []
+
+        for page_idx in range(len(fitz_doc)):
+            page = fitz_doc[page_idx]
+            page_num = page_idx + 1
+
+            for a in page.annots():
+                subtype = a.type[1] if isinstance(a.type, tuple) and len(a.type) > 1 else "Unknown"
+                rect = (a.rect.x0, a.rect.y0, a.rect.x1, a.rect.y1)
+                struct_parent = None
+                is_tagged = False
+
+                # Query pikepdf annotation object
+                try:
+                    if a.xref and a.xref in pike_doc.objects:
+                        annot_obj = pike_doc.objects[a.xref]
+                        if "/StructParent" in annot_obj:
+                            struct_parent = int(annot_obj["/StructParent"])
+                            is_tagged = True
+                except Exception:
+                    pass
+
+                # If subtype is Link or Widget and struct_tree has link/form
+                if not is_tagged and struct_tree:
+                    if subtype == "Link" and struct_tree.find_all_by_standard_tag("Link"):
+                        is_tagged = True
+                    elif subtype == "Widget" and struct_tree.find_all_by_standard_tag("Form"):
+                        is_tagged = True
+
+                annots.append(AnnotationModel(
+                    id=f"annot_p{page_num}_{a.xref}",
+                    page=page_num,
+                    subtype=subtype,
+                    rect=rect,
+                    struct_parent=struct_parent,
+                    is_tagged=is_tagged,
+                    contents=a.info.get("content", "")
+                ))
+
+        return annots
+
     def _extract_bookmarks(self, fitz_doc: pymupdf.Document) -> List[BookmarkModel]:
         """Extracts document table of contents / bookmarks hierarchy."""
-        toc = fitz_doc.get_toc()  # [[lvl, title, page, ...], ...]
+        toc = fitz_doc.get_toc()
         bookmarks: List[BookmarkModel] = []
         stack: List[Tuple[int, BookmarkModel]] = []
 

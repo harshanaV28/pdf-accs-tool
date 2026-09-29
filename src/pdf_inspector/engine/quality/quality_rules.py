@@ -140,7 +140,20 @@ class LinkQualityRule(BaseRule):
                 evidence="Links count: 0"
             )]
 
-        bare_urls = [l for l in doc.links if l.text.startswith(("http://", "https://", "www."))]
+        VAGUE_PATTERNS = re.compile(r"^(click\s+here|read\s+more|learn\s+more|more\s+info|more\s+details|link|here|more)(\.{0,3}|…)?$", re.IGNORECASE)
+        vague_links = [l for l in doc.links if VAGUE_PATTERNS.match(l.text.strip())]
+        if vague_links:
+            for vl in vague_links[:5]:
+                results.append(self.create_result(
+                    status=CheckStatus.WARNING,
+                    message=f"Ambiguous link label '{vl.text.strip()}' on page {vl.page} provides insufficient context out of context.",
+                    evidence=f"Link text: '{vl.text.strip()}' targeting {vl.uri}",
+                    page=vl.page,
+                    bounding_box=vl.bbox,
+                    custom_remediation="Change the link label to describe the specific destination or topic (e.g., 'Download Annual Report 2026')."
+                ))
+
+        bare_urls = [l for l in doc.links if l.text.strip().startswith(("http://", "https://", "www."))]
         if bare_urls:
             results.append(self.create_result(
                 status=CheckStatus.WARNING,
@@ -150,10 +163,11 @@ class LinkQualityRule(BaseRule):
                 bounding_box=bare_urls[0].bbox,
                 custom_remediation="Provide human-readable link text instead of full URL strings."
             ))
-        else:
+
+        if not vague_links and not bare_urls:
             results.append(self.create_result(
                 status=CheckStatus.PASS,
-                message="No bare URL link text found.",
+                message="All hyperlink anchor labels appear meaningful and avoid bare URLs.",
                 evidence="Link labels checked."
             ))
 

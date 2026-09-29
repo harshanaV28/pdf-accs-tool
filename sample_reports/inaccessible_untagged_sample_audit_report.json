@@ -1,7 +1,7 @@
 {
   "application": "PDF Accessibility Inspector",
   "version": "1.0.0",
-  "generated_at": "2026-09-29 13:22:08",
+  "generated_at": "2026-09-29 13:53:43",
   "document": {
     "filename": "inaccessible_untagged_sample.pdf",
     "filepath": "C:\\Users\\HBS\\Desktop\\pdf checking tool\\test_samples\\inaccessible_untagged_sample.pdf",
@@ -23,12 +23,13 @@
     "bookmarks_count": 0
   },
   "summary": {
-    "total_checks": 33,
-    "passed": 15,
-    "warned": 5,
+    "total_checks": 38,
+    "passed": 19,
+    "warned": 6,
     "failed": 12,
     "manual_review": 1,
-    "compliance_score_percent": 46.9
+    "compliance_score": 51.4,
+    "compliance_score_percent": 51.4
   },
   "category_breakdown": {
     "PDF/UA": {
@@ -39,13 +40,13 @@
         "manual": 0
       },
       "Fonts": {
-        "passed": 0,
+        "passed": 2,
         "warned": 1,
         "failed": 1,
         "manual": 0
       },
       "Content": {
-        "passed": 0,
+        "passed": 1,
         "warned": 0,
         "failed": 1,
         "manual": 0
@@ -66,6 +67,12 @@
         "passed": 0,
         "warned": 0,
         "failed": 1,
+        "manual": 0
+      },
+      "Structure Elements": {
+        "passed": 2,
+        "warned": 0,
+        "failed": 0,
         "manual": 0
       },
       "Alternative Descriptions": {
@@ -175,8 +182,8 @@
         "manual": 0
       },
       "Link Quality": {
-        "passed": 1,
-        "warned": 0,
+        "passed": 0,
+        "warned": 1,
         "failed": 0,
         "manual": 0
       }
@@ -276,6 +283,42 @@
       "manual_review_required": false
     },
     {
+      "check_id": "PDFUA-UNICODE-001",
+      "name": "Unicode Private Use Area",
+      "category": "Fonts",
+      "standard": "PDF/UA",
+      "status": "PASS",
+      "severity": "HIGH",
+      "message": "No unannounced Unicode Private Use Area (PUA) glyphs detected.",
+      "description": "Characters mapped to Unicode Private Use Area (PUA: U+E000 to U+F8FF) must have an /ActualText replacement.",
+      "evidence": "PUA character check passed.",
+      "page": null,
+      "bounding_box": null,
+      "object_reference": "",
+      "remediation": "Replace custom icon/symbol font glyphs with standard Unicode symbols or enclose in a Span with /ActualText.",
+      "confidence": 1.0,
+      "machine_testable": true,
+      "manual_review_required": false
+    },
+    {
+      "check_id": "PDFUA-UNICODE-002",
+      "name": "Replacement Characters",
+      "category": "Fonts",
+      "standard": "PDF/UA",
+      "status": "PASS",
+      "severity": "HIGH",
+      "message": "No replacement characters (U+FFFD) detected in extracted text.",
+      "description": "Text should not contain unmapped glyph replacement characters (U+FFFD).",
+      "evidence": "Glyph mapping integrity verified.",
+      "page": null,
+      "bounding_box": null,
+      "object_reference": "",
+      "remediation": "Ensure font embedding and ToUnicode CMaps map every glyph to a real character.",
+      "confidence": 1.0,
+      "machine_testable": true,
+      "manual_review_required": false
+    },
+    {
       "check_id": "PDFUA-CONTENT-001",
       "name": "Tagged PDF",
       "category": "Content",
@@ -289,6 +332,24 @@
       "bounding_box": null,
       "object_reference": "",
       "remediation": "Tag the document using an accessible PDF authoring tool or Adobe Acrobat Pro's 'Autotag Document' feature.",
+      "confidence": 1.0,
+      "machine_testable": true,
+      "manual_review_required": false
+    },
+    {
+      "check_id": "PDFUA-ANNOT-001",
+      "name": "Annotations Tagged",
+      "category": "Content",
+      "standard": "PDF/UA",
+      "status": "PASS",
+      "severity": "HIGH",
+      "message": "No interactive annotations found in document.",
+      "description": "All interactive annotations (links, form fields, notes) must be associated with a structure element in the logical structure tree (ISO 14289-1, Clause 7.18).",
+      "evidence": "Annotation count: 0",
+      "page": null,
+      "bounding_box": null,
+      "object_reference": "",
+      "remediation": "Tag untagged annotations or link them using an OBJR (Object Reference) in Acrobat Pro.",
       "confidence": 1.0,
       "machine_testable": true,
       "manual_review_required": false
@@ -343,6 +404,42 @@
       "bounding_box": null,
       "object_reference": "",
       "remediation": "Add structural tags to the document using an accessible PDF creator or Acrobat Pro.",
+      "confidence": 1.0,
+      "machine_testable": true,
+      "manual_review_required": false
+    },
+    {
+      "check_id": "PDFUA-LIST-001",
+      "name": "List Structure Hierarchy",
+      "category": "Structure Elements",
+      "standard": "PDF/UA",
+      "status": "PASS",
+      "severity": "HIGH",
+      "message": "No lists detected in document (or document contains no list structures).",
+      "description": "A list (<L>) must contain only list items (<LI>), and each <LI> must contain only list label (<Lbl>) and/or list body (<LBody>) elements.",
+      "evidence": "List count: 0",
+      "page": null,
+      "bounding_box": null,
+      "object_reference": "",
+      "remediation": "In Acrobat Pro Tags panel, re-nest list elements so that L contains LI, and LI contains Lbl and LBody.",
+      "confidence": 1.0,
+      "machine_testable": true,
+      "manual_review_required": false
+    },
+    {
+      "check_id": "PDFUA-TABLE-001",
+      "name": "Table Headers & Structure",
+      "category": "Structure Elements",
+      "standard": "PDF/UA",
+      "status": "PASS",
+      "severity": "HIGH",
+      "message": "No tables detected in document.",
+      "description": "Data tables must include header cells (<TH>) and maintain strict parent-child relationships (Table > TR > TH/TD).",
+      "evidence": "Table count: 0",
+      "page": null,
+      "bounding_box": null,
+      "object_reference": "",
+      "remediation": "Identify column or row headers in Acrobat Pro Table Editor, set cell type to Header Cell, and define Scope.",
       "confidence": 1.0,
       "machine_testable": true,
       "manual_review_required": false
@@ -740,15 +837,20 @@
       "name": "Meaningful Link Labels",
       "category": "Link Quality",
       "standard": "Quality",
-      "status": "PASS",
+      "status": "WARNING",
       "severity": "LOW",
-      "message": "No bare URL link text found.",
+      "message": "Ambiguous link label 'click here' on page 1 provides insufficient context out of context.",
       "description": "Hyperlink labels should be meaningful out of context to assist screen reader users.",
-      "evidence": "Link labels checked.",
-      "page": null,
-      "bounding_box": null,
+      "evidence": "Link text: 'click here' targeting https://example.com/unlabeled",
+      "page": 1,
+      "bounding_box": [
+        50.0,
+        280.0,
+        120.0,
+        295.0
+      ],
       "object_reference": "",
-      "remediation": "Replace vague labels like 'click here' or bare URLs with clear descriptions of the destination.",
+      "remediation": "Change the link label to describe the specific destination or topic (e.g., 'Download Annual Report 2026').",
       "confidence": 1.0,
       "machine_testable": true,
       "manual_review_required": false

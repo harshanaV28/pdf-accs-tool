@@ -1,11 +1,11 @@
 {
   "application": "PDF Accessibility Inspector",
   "version": "1.0.0",
-  "generated_at": "2026-09-29 13:22:08",
+  "generated_at": "2026-09-29 13:53:43",
   "document": {
     "filename": "accessible_sample.pdf",
     "filepath": "C:\\Users\\HBS\\Desktop\\pdf checking tool\\test_samples\\accessible_sample.pdf",
-    "filesize": 74562,
+    "filesize": 74950,
     "page_count": 1,
     "pdf_version": "1.4",
     "title": "Annual Accessibility and Technology Report 2026",
@@ -23,12 +23,13 @@
     "bookmarks_count": 0
   },
   "summary": {
-    "total_checks": 39,
-    "passed": 34,
+    "total_checks": 47,
+    "passed": 42,
     "warned": 4,
     "failed": 0,
     "manual_review": 1,
-    "compliance_score_percent": 89.5
+    "compliance_score": 91.3,
+    "compliance_score_percent": 91.3
   },
   "category_breakdown": {
     "PDF/UA": {
@@ -39,13 +40,13 @@
         "manual": 0
       },
       "Fonts": {
-        "passed": 1,
+        "passed": 3,
         "warned": 2,
         "failed": 0,
         "manual": 0
       },
       "Content": {
-        "passed": 2,
+        "passed": 4,
         "warned": 0,
         "failed": 0,
         "manual": 0
@@ -63,13 +64,13 @@
         "manual": 0
       },
       "Structure tree": {
-        "passed": 1,
+        "passed": 3,
         "warned": 0,
         "failed": 0,
         "manual": 0
       },
       "Structure Elements": {
-        "passed": 1,
+        "passed": 3,
         "warned": 1,
         "failed": 0,
         "manual": 0
@@ -312,6 +313,42 @@
       "manual_review_required": false
     },
     {
+      "check_id": "PDFUA-UNICODE-001",
+      "name": "Unicode Private Use Area",
+      "category": "Fonts",
+      "standard": "PDF/UA",
+      "status": "PASS",
+      "severity": "HIGH",
+      "message": "No unannounced Unicode Private Use Area (PUA) glyphs detected.",
+      "description": "Characters mapped to Unicode Private Use Area (PUA: U+E000 to U+F8FF) must have an /ActualText replacement.",
+      "evidence": "PUA character check passed.",
+      "page": null,
+      "bounding_box": null,
+      "object_reference": "",
+      "remediation": "Replace custom icon/symbol font glyphs with standard Unicode symbols or enclose in a Span with /ActualText.",
+      "confidence": 1.0,
+      "machine_testable": true,
+      "manual_review_required": false
+    },
+    {
+      "check_id": "PDFUA-UNICODE-002",
+      "name": "Replacement Characters",
+      "category": "Fonts",
+      "standard": "PDF/UA",
+      "status": "PASS",
+      "severity": "HIGH",
+      "message": "No replacement characters (U+FFFD) detected in extracted text.",
+      "description": "Text should not contain unmapped glyph replacement characters (U+FFFD).",
+      "evidence": "Glyph mapping integrity verified.",
+      "page": null,
+      "bounding_box": null,
+      "object_reference": "",
+      "remediation": "Ensure font embedding and ToUnicode CMaps map every glyph to a real character.",
+      "confidence": 1.0,
+      "machine_testable": true,
+      "manual_review_required": false
+    },
+    {
       "check_id": "PDFUA-CONTENT-001",
       "name": "Tagged PDF",
       "category": "Content",
@@ -343,6 +380,42 @@
       "bounding_box": null,
       "object_reference": "",
       "remediation": "Inspect untagged elements in the PDF structure pane and tag them or mark them as background artifacts.",
+      "confidence": 1.0,
+      "machine_testable": true,
+      "manual_review_required": false
+    },
+    {
+      "check_id": "PDFUA-ARTIFACT-001",
+      "name": "Artifacts in Structure Tree",
+      "category": "Content",
+      "standard": "PDF/UA",
+      "status": "PASS",
+      "severity": "HIGH",
+      "message": "No illegal <Artifact> tags present in the structure tree.",
+      "description": "Artifacts must not be tagged as structural elements inside the logical structure tree (ISO 14289-1, Clause 7.1).",
+      "evidence": "Structure tree artifact check passed.",
+      "page": null,
+      "bounding_box": null,
+      "object_reference": "",
+      "remediation": "Remove the <Artifact> tag from the Structure Tree in Acrobat Pro. Mark it as an Artifact in the page content stream instead.",
+      "confidence": 1.0,
+      "machine_testable": true,
+      "manual_review_required": false
+    },
+    {
+      "check_id": "PDFUA-ANNOT-001",
+      "name": "Annotations Tagged",
+      "category": "Content",
+      "standard": "PDF/UA",
+      "status": "PASS",
+      "severity": "HIGH",
+      "message": "No interactive annotations found in document.",
+      "description": "All interactive annotations (links, form fields, notes) must be associated with a structure element in the logical structure tree (ISO 14289-1, Clause 7.18).",
+      "evidence": "Annotation count: 0",
+      "page": null,
+      "bounding_box": null,
+      "object_reference": "",
+      "remediation": "Tag untagged annotations or link them using an OBJR (Object Reference) in Acrobat Pro.",
       "confidence": 1.0,
       "machine_testable": true,
       "manual_review_required": false
@@ -420,6 +493,42 @@
       "manual_review_required": false
     },
     {
+      "check_id": "PDFUA-TREE-002",
+      "name": "ParentTree Integrity",
+      "category": "Structure tree",
+      "standard": "PDF/UA",
+      "status": "PASS",
+      "severity": "HIGH",
+      "message": "/ParentTree number tree is present and valid with 1 mapped entries.",
+      "description": "The structure tree must include a valid /ParentTree number tree that accurately maps page content and annotations to structural elements.",
+      "evidence": "ParentTree entries: 1",
+      "page": null,
+      "bounding_box": null,
+      "object_reference": "",
+      "remediation": "Regenerate tags and the ParentTree in Acrobat Pro or re-export using a PDF/UA compliant authoring tool.",
+      "confidence": 1.0,
+      "machine_testable": true,
+      "manual_review_required": false
+    },
+    {
+      "check_id": "PDFUA-TREE-002",
+      "name": "ParentTree Integrity",
+      "category": "Structure tree",
+      "standard": "PDF/UA",
+      "status": "PASS",
+      "severity": "HIGH",
+      "message": "All pages with marked content possess valid /StructParents attributes.",
+      "description": "The structure tree must include a valid /ParentTree number tree that accurately maps page content and annotations to structural elements.",
+      "evidence": "Page StructParents validated.",
+      "page": null,
+      "bounding_box": null,
+      "object_reference": "",
+      "remediation": "Regenerate tags and the ParentTree in Acrobat Pro or re-export using a PDF/UA compliant authoring tool.",
+      "confidence": 1.0,
+      "machine_testable": true,
+      "manual_review_required": false
+    },
+    {
       "check_id": "PDFUA-STRUCT-001",
       "name": "Structure Elements Nesting",
       "category": "Structure Elements",
@@ -433,6 +542,42 @@
       "bounding_box": null,
       "object_reference": "",
       "remediation": "Fix nesting in the Tag Tree so lists contain LI, tables contain TR, and TR contains TH/TD.",
+      "confidence": 1.0,
+      "machine_testable": true,
+      "manual_review_required": false
+    },
+    {
+      "check_id": "PDFUA-LIST-001",
+      "name": "List Structure Hierarchy",
+      "category": "Structure Elements",
+      "standard": "PDF/UA",
+      "status": "PASS",
+      "severity": "HIGH",
+      "message": "No lists detected in document (or document contains no list structures).",
+      "description": "A list (<L>) must contain only list items (<LI>), and each <LI> must contain only list label (<Lbl>) and/or list body (<LBody>) elements.",
+      "evidence": "List count: 0",
+      "page": null,
+      "bounding_box": null,
+      "object_reference": "",
+      "remediation": "In Acrobat Pro Tags panel, re-nest list elements so that L contains LI, and LI contains Lbl and LBody.",
+      "confidence": 1.0,
+      "machine_testable": true,
+      "manual_review_required": false
+    },
+    {
+      "check_id": "PDFUA-TABLE-001",
+      "name": "Table Headers & Structure",
+      "category": "Structure Elements",
+      "standard": "PDF/UA",
+      "status": "PASS",
+      "severity": "HIGH",
+      "message": "No tables detected in document.",
+      "description": "Data tables must include header cells (<TH>) and maintain strict parent-child relationships (Table > TR > TH/TD).",
+      "evidence": "Table count: 0",
+      "page": null,
+      "bounding_box": null,
+      "object_reference": "",
+      "remediation": "Identify column or row headers in Acrobat Pro Table Editor, set cell type to Header Cell, and define Scope.",
       "confidence": 1.0,
       "machine_testable": true,
       "manual_review_required": false

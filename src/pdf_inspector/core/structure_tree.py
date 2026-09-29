@@ -1,7 +1,8 @@
 """
 PDF Structure Tree Parser
-Parses the Logical Structure Tree (/StructTreeRoot) using pikepdf and resolves
-custom role mappings to ISO 32000-1 standard structure types.
+Parses the Logical Structure Tree (/StructTreeRoot), /ParentTree number tree,
+and resolves custom role mappings to ISO 32000-1 standard structure types.
+Links real page MCID text and geometry to structural nodes.
 """
 
 from typing import Dict, List, Optional, Tuple, Set, Any
@@ -58,22 +59,71 @@ def resolve_role(tag: str, role_map: Dict[str, str]) -> Tuple[str, bool, bool]:
         curr = clean_next
 
 
+def parse_number_tree(tree_obj: Any) -> Dict[int, Any]:
+    """
+    Recursively parses a PDF Number Tree dictionary into a Python dict {int_key: object}.
+    Number trees can contain either /Nums or /Kids arrays.
+    """
+    results: Dict[int, Any] = {}
+    if not isinstance(tree_obj, (pikepdf.Dictionary, pikepdf.Object)):
+        return results
+
+    try:
+        if "/Nums" in tree_obj:
+            nums = tree_obj["/Nums"]
+            for i in range(0, len(nums), 2):
+                if i + 1 < len(nums):
+                    key = int(nums[i])
+                    val = nums[i + 1]
+                    results[key] = val
+
+        elif "/Kids" in tree_obj:
+            kids = tree_obj["/Kids"]
+            for kid in kids:
+                results.update(parse_number_tree(kid))
+    except Exception as e:
+        logger.debug(f"Error parsing number tree node: {e}")
+
+    return results
+
+
 class StructureTreeParser:
     """Extracts and builds the hierarchical StructureNode tree from a pikepdf document."""
 
-    def __init__(self, pdf: pikepdf.Pdf, role_map: Dict[str, str], page_map: Dict[Any, int]):
+    def __init__(
+        self,
+        pdf: pikepdf.Pdf,
+        role_map: Dict[str, str],
+        page_map: Dict[Any, int],
+        page_mcid_data: Optional[Dict[int, Dict[int, Tuple[str, Tuple[float, float, float, float]]]]] = None
+    ):
         self.pdf = pdf
         self.role_map = role_map
         self.page_map = page_map  # Map pikepdf page object ref -> 1-based page number
+        self.page_mcid_data = page_mcid_data or {}  # page -> {mcid: (text, bbox)}
         self.node_counter = 0
+        self.parent_tree_entries: Dict[int, Any] = {}
+        self.has_parent_tree: bool = False
+        self.parent_tree_valid: bool = False
 
     def parse(self) -> Optional[StructureNode]:
-        """Parses the root StructTreeRoot if present."""
+        """Parses the root StructTreeRoot and /ParentTree if present."""
         try:
             if "/StructTreeRoot" not in self.pdf.Root:
                 return None
 
             root_obj = self.pdf.Root.StructTreeRoot
+
+            # Parse ParentTree
+            if "/ParentTree" in root_obj:
+                self.has_parent_tree = True
+                try:
+                    self.parent_tree_entries = parse_number_tree(root_obj["/ParentTree"])
+                    self.parent_tree_valid = len(self.parent_tree_entries) > 0
+                except Exception as e:
+                    logger.debug(f"Failed parsing ParentTree: {e}")
+                    self.parent_tree_valid = False
+
             root_node = StructureNode(
                 id="root",
                 tag="StructTreeRoot",
@@ -100,7 +150,6 @@ class StructureTreeParser:
 
     def _parse_k_item(self, item: Any, parent_node: StructureNode):
         if isinstance(item, pikepdf.Dictionary):
-            # Check if this is a StructElem or MCR (Marked Content Reference) or OBJR
             elem_type = str(item.get("/Type", ""))
             if elem_type == "/MCR":
                 # Marked Content Reference
@@ -119,7 +168,7 @@ class StructureTreeParser:
                     parent_node.page = self._resolve_page_number(pg_ref)
                 return
 
-            # It's a structural element /StructElem
+            # Structural element /StructElem
             self.node_counter += 1
             node_id = f"node_{self.node_counter}"
 
@@ -135,13 +184,18 @@ class StructureTreeParser:
             if "/Pg" in item:
                 page_num = self._resolve_page_number(item["/Pg"])
 
-            # Attributes
+            # Attributes dictionary /A
             attrs: Dict[str, Any] = {}
             if "/A" in item:
                 a_val = item["/A"]
                 if isinstance(a_val, pikepdf.Dictionary):
                     for k, v in a_val.items():
                         attrs[str(k).strip("/")] = str(v)
+                elif isinstance(a_val, pikepdf.Array):
+                    for idx, a_elem in enumerate(a_val):
+                        if isinstance(a_elem, pikepdf.Dictionary):
+                            for k, v in a_elem.items():
+                                attrs[f"{str(k).strip('/')}_{idx}"] = str(v)
 
             child_node = StructureNode(
                 id=node_id,
@@ -160,11 +214,46 @@ class StructureTreeParser:
             if "/K" in item:
                 self._parse_k(item["/K"], child_node)
 
+            # Attach actual page text and bounding box from MCID data
+            self._link_mcid_data(child_node)
+
             parent_node.children.append(child_node)
 
         elif isinstance(item, (int, pikepdf.Integer)):
             # Direct MCID on parent
             parent_node.mcids.append(int(item))
+            self._link_mcid_data(parent_node)
+
+    def _link_mcid_data(self, node: StructureNode):
+        """Populates node.text_content and node.bbox from real page MCID records."""
+        if not node.page or not node.mcids:
+            return
+
+        page_data = self.page_mcid_data.get(node.page)
+        if not page_data:
+            return
+
+        texts: List[str] = []
+        bboxes: List[Tuple[float, float, float, float]] = []
+
+        for mcid in node.mcids:
+            if mcid in page_data:
+                txt, box = page_data[mcid]
+                if txt:
+                    texts.append(txt)
+                if box and any(c > 0 for c in box):
+                    bboxes.append(box)
+
+        if texts and not node.text_content:
+            node.text_content = " ".join(texts)
+
+        if bboxes and not node.bbox:
+            # Union of bounding boxes
+            min_x = min(b[0] for b in bboxes)
+            min_y = min(b[1] for b in bboxes)
+            max_x = max(b[2] for b in bboxes)
+            max_y = max(b[3] for b in bboxes)
+            node.bbox = (min_x, min_y, max_x, max_y)
 
     def _resolve_page_number(self, pg_obj: Any) -> Optional[int]:
         """Resolves a pikepdf page dictionary or indirect object to a 1-based page number."""

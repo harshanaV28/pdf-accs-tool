@@ -159,6 +159,7 @@ class MainWindow(QMainWindow):
         self.center_stack.addWidget(self.statistics_view)  # 7
 
         self.elements_view = ElementsView()
+        self.elements_view.element_jump_requested.connect(self._on_element_jump_requested)
         self.center_stack.addWidget(self.elements_view)  # 8
 
         self.batch_view = BatchScanView()
@@ -333,6 +334,12 @@ class MainWindow(QMainWindow):
         """User selected a node in the structure tag tree."""
         if node.page:
             self.pdf_viewer.go_to_page(node.page, node.bbox)
+
+    def _on_element_jump_requested(self, page: int, bbox=None):
+        """User double clicked an element in Elements view; navigate and illuminate."""
+        if page:
+            self.sidebar.select_page("PDF Viewer")
+            self.pdf_viewer.go_to_page(page, bbox)
 
     def action_export_report(self):
         if not self.current_report or not self.current_doc:

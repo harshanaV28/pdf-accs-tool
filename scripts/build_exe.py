@@ -49,6 +49,22 @@ def build():
         "--hidden-import", "PySide6.QtCore",
         "--hidden-import", "PySide6.QtGui",
         "--hidden-import", "PySide6.QtWidgets",
+        "--hidden-import", "src.pdf_inspector.engine.pdf_ua",
+        "--hidden-import", "src.pdf_inspector.engine.wcag",
+        "--hidden-import", "src.pdf_inspector.engine.quality",
+        "--hidden-import", "src.pdf_inspector.engine.ai_heuristics",
+        "--hidden-import", "src.pdf_inspector.reporting.pdf_report",
+        "--hidden-import", "src.pdf_inspector.reporting.html_report",
+        "--hidden-import", "src.pdf_inspector.reporting.json_exporter",
+        "--hidden-import", "src.pdf_inspector.ui.views.batch_view",
+        "--hidden-import", "src.pdf_inspector.ui.views.checkpoints_view",
+        "--hidden-import", "src.pdf_inspector.ui.views.detailed_results_view",
+        "--hidden-import", "src.pdf_inspector.ui.views.dashboard_view",
+        "--hidden-import", "src.pdf_inspector.ui.views.elements_view",
+        "--hidden-import", "src.pdf_inspector.ui.views.metadata_view",
+        "--hidden-import", "src.pdf_inspector.ui.views.screen_reader_view",
+        "--hidden-import", "src.pdf_inspector.ui.views.statistics_view",
+        "--hidden-import", "src.pdf_inspector.ui.views.tag_tree_view",
         main_script
     ]
 

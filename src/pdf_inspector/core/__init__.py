@@ -2,8 +2,8 @@
 
 from .models import (
     CheckStatus, Severity, CheckResult, StructureNode,
-    FontModel, ImageModel, TableModel, LinkModel, FormFieldModel,
-    BookmarkModel, PageModel, PDFDocumentModel, AuditReport
+    FontModel, ImageModel, TableModel, ListModel, LinkModel, FormFieldModel,
+    AnnotationModel, BookmarkModel, PageModel, PDFDocumentModel, AuditReport
 )
 from .document_parser import DocumentParser
 from .structure_tree import StructureTreeParser, resolve_role, STANDARD_STRUCTURE_TYPES

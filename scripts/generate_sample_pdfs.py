@@ -70,11 +70,7 @@ def generate_samples(output_dir: str):
         pdoc.Root["/Lang"] = pikepdf.String("en-US")
         pdoc.Root["/ViewerPreferences"] = pikepdf.Dictionary({"/DisplayDocTitle": True})
 
-        # Add StructTreeRoot
-        struct_root = pikepdf.Dictionary({
-            "/Type": pikepdf.Name("/StructTreeRoot"),
-            "/RoleMap": pikepdf.Dictionary({"/HeaderOne": pikepdf.Name("/H1")})
-        })
+        # Add StructTreeRoot & ParentTree
         doc_elem = pikepdf.Dictionary({
             "/Type": pikepdf.Name("/StructElem"),
             "/S": pikepdf.Name("/Document"),
@@ -88,11 +84,23 @@ def generate_samples(output_dir: str):
             "/Pg": pdoc.pages[0].objgen
         })
         doc_elem["/K"] = pikepdf.Array([h1_elem])
-        struct_root["/K"] = pikepdf.Array([doc_elem])
+
+        parent_tree = pikepdf.Dictionary({
+            "/Nums": pikepdf.Array([pikepdf.Integer(0), pikepdf.Array([doc_elem, h1_elem])])
+        })
+
+        struct_root = pikepdf.Dictionary({
+            "/Type": pikepdf.Name("/StructTreeRoot"),
+            "/RoleMap": pikepdf.Dictionary({"/HeaderOne": pikepdf.Name("/H1")}),
+            "/ParentTree": pdoc.make_indirect(parent_tree),
+            "/ParentTreeNextKey": pikepdf.Integer(1),
+            "/K": pikepdf.Array([doc_elem])
+        })
         pdoc.Root["/StructTreeRoot"] = pdoc.make_indirect(struct_root)
 
-        # Add page tab order
+        # Add page tab order & StructParents
         pdoc.pages[0]["/Tabs"] = pikepdf.Name("/S")
+        pdoc.pages[0]["/StructParents"] = pikepdf.Integer(0)
 
         # XMP PDF/UA identification
         xmp_xml = """<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>

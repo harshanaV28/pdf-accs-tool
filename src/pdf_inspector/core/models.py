@@ -186,18 +186,45 @@ class BookmarkModel:
 
 
 @dataclass
+class AnnotationModel:
+    """Represents a PDF page annotation and its association to the logical structure tree."""
+    id: str
+    page: int
+    subtype: str
+    rect: Tuple[float, float, float, float]
+    struct_parent: Optional[int] = None
+    is_tagged: bool = False
+    contents: Optional[str] = None
+
+
+@dataclass
+class ListModel:
+    """Represents an ordered or unordered structural list element (<L>)."""
+    id: str
+    page: int
+    items_count: int
+    is_valid_structure: bool  # L -> LI -> (Lbl, LBody)
+    has_labels: bool
+    bbox: Optional[Tuple[float, float, float, float]] = None
+
+
+@dataclass
 class PageModel:
     """Represents metadata and geometry for a single PDF page."""
     page_number: int  # 1-indexed
     width: float
     height: float
-    rotation: int
-    text: str
+    rotation: int = 0
+    text: str = ""
     images_count: int = 0
     links_count: int = 0
     has_structure: bool = False
     has_tab_order: bool = False
     tab_order_mode: str = "Unspecified"
+    struct_parents_id: Optional[int] = None
+    mcids: List[int] = field(default_factory=list)
+    mcid_bboxes: Dict[int, Tuple[float, float, float, float]] = field(default_factory=dict)
+    mcid_texts: Dict[int, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -224,14 +251,19 @@ class PDFDocumentModel:
     xmp_metadata_present: bool = False
     pdfua_identifier_present: bool = False
     pdfua_part: Optional[int] = None
+    has_parent_tree: bool = False
+    parent_tree_valid: bool = False
+    parent_tree_entries_count: int = 0
     role_map: Dict[str, str] = field(default_factory=dict)
     pages: List[PageModel] = field(default_factory=list)
     structure_tree: Optional[StructureNode] = None
     fonts: List[FontModel] = field(default_factory=list)
     images: List[ImageModel] = field(default_factory=list)
     tables: List[TableModel] = field(default_factory=list)
+    lists: List[ListModel] = field(default_factory=list)
     links: List[LinkModel] = field(default_factory=list)
     form_fields: List[FormFieldModel] = field(default_factory=list)
+    annotations: List[AnnotationModel] = field(default_factory=list)
     bookmarks: List[BookmarkModel] = field(default_factory=list)
     raw_metadata: Dict[str, Any] = field(default_factory=dict)
 

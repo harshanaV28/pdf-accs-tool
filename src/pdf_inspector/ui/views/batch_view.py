@@ -62,13 +62,20 @@ class BatchScanView(QWidget):
 
     def _select_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Folder Containing PDFs")
-        if not folder:
-            return
+        if folder:
+            self.scan_folder(folder)
+
+    def scan_folder(self, folder: str) -> List[Dict[str, Any]]:
+        """Scans a directory of PDF files and displays aggregate results."""
+        if not os.path.exists(folder):
+            self.lbl_status.setText(f"Directory not found: {folder}")
+            return []
 
         pdf_files = [os.path.join(folder, f) for f in os.listdir(folder) if f.lower().endswith(".pdf")]
+        results = []
         if not pdf_files:
             self.lbl_status.setText(f"No PDF files found in {folder}.")
-            return
+            return results
 
         self.lbl_status.setText(f"Scanning {len(pdf_files)} PDF file(s)...")
         self.progress_bar.setVisible(True)
@@ -78,10 +85,20 @@ class BatchScanView(QWidget):
         self.table.setRowCount(len(pdf_files))
         for idx, pdf_path in enumerate(pdf_files):
             filename = os.path.basename(pdf_path)
+            res_item = {"filename": filename, "filepath": pdf_path}
             try:
                 parser = DocumentParser(pdf_path)
                 doc = parser.parse()
                 report = self.runner.run(doc)
+
+                res_item.update({
+                    "score": report.compliance_score,
+                    "is_tagged": doc.is_tagged,
+                    "passed": report.total_passed,
+                    "warned": report.total_warned,
+                    "failed": report.total_failed,
+                    "status": "Success"
+                })
 
                 self.table.setItem(idx, 0, QTableWidgetItem(filename))
                 self.table.setItem(idx, 1, QTableWidgetItem(f"{report.compliance_score}%"))
@@ -89,17 +106,22 @@ class BatchScanView(QWidget):
                 self.table.setItem(idx, 3, QTableWidgetItem(str(report.total_passed)))
                 self.table.setItem(idx, 4, QTableWidgetItem(str(report.total_warned)))
                 self.table.setItem(idx, 5, QTableWidgetItem(str(report.total_failed)))
-
-                # Store full path in item user data
                 self.table.item(idx, 0).setData(Qt.UserRole, pdf_path)
             except Exception as e:
+                res_item.update({"status": f"Error: {e}", "score": 0.0, "is_tagged": False, "passed": 0, "warned": 0, "failed": 0})
                 self.table.setItem(idx, 0, QTableWidgetItem(f"{filename} (Error)"))
                 self.table.setItem(idx, 1, QTableWidgetItem("Err"))
+                self.table.setItem(idx, 2, QTableWidgetItem("N/A"))
+                self.table.setItem(idx, 3, QTableWidgetItem("0"))
+                self.table.setItem(idx, 4, QTableWidgetItem("0"))
+                self.table.setItem(idx, 5, QTableWidgetItem("0"))
 
+            results.append(res_item)
             self.progress_bar.setValue(idx + 1)
 
         self.progress_bar.setVisible(False)
         self.lbl_status.setText(f"Completed scanning {len(pdf_files)} PDF file(s). Double-click a row to open.")
+        return results
 
     def _on_row_double_click(self, item):
         row = item.row()
