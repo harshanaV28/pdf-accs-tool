@@ -82,6 +82,119 @@ def build():
         print(f"BUILD SUCCESSFUL!")
         print(f"Deliverable: {exe_path} ({size_mb} MB)")
         print("============================================================")
+
+        # Generate dist/README.txt
+        readme_path = os.path.join(root_dir, "dist", "README.txt")
+        readme_content = """================================================================================
+PDF ACCESSIBILITY INSPECTOR (Windows x64)
+Version 1.0.0
+================================================================================
+
+1. OVERVIEW
+--------------------------------------------------------------------------------
+PDF Accessibility Inspector is an independent, professional Windows desktop 
+application engineered to audit and inspect the accessibility of PDF documents 
+according to:
+  * ISO 14289-1:2014 (PDF/UA-1)
+  * ISO 32000-1 (PDF 1.7) / ISO 32000-2 (PDF 2.0)
+  * W3C Web Content Accessibility Guidelines (WCAG 2.1 / 2.2 AA)
+  * Matterhorn Protocol 1.1
+
+The application operates completely offline with zero cloud API dependencies.
+No Python installation, runtime environment, or terminal is required.
+
+2. HOW TO RUN
+--------------------------------------------------------------------------------
+* Graphical Launch:
+    Double-click PDF-Accessibility-Inspector.exe to start the application.
+
+* Command-Line / Scripted Launch:
+    PDF-Accessibility-Inspector.exe [path_to_pdf_file]
+    Example:
+    PDF-Accessibility-Inspector.exe "C:\\Documents\\AnnualReport.pdf"
+
+* Drag & Drop:
+    Drag any PDF file directly into the application window to audit it.
+
+3. CORE FEATURES & CAPABILITIES
+--------------------------------------------------------------------------------
+* Checkpoints View:
+    Tabbed PAC-style inspection matrix (PDF/UA, WCAG, Quality, AI) with Pass,
+    Warning, and Failure metrics per category.
+
+* Interactive Tag Tree:
+    Full logical structure tree traversal (/StructTreeRoot) showing tags, 
+    role maps, attributes, and direct page bounding box links.
+
+* Screen Reader Preview:
+    Reconstructs the linear acoustic reading stream voiced by assistive 
+    technologies based on document structure and tag hierarchy.
+
+* Interactive PDF Viewer:
+    High-DPI page rendering with zoom (25%-400%), page navigation, and glowing
+    bounding-box overlays highlighting non-compliant elements on the page.
+
+* Dedicated Element Inspectors:
+    * Fonts: Subtype, embedding, subset, ToUnicode CMaps, encoding, page usage.
+    * Images: Dimensions, colorspace, alt text presence, artifact status.
+    * Tables: Row/column counts, header cell presence (<TH>), matrix symmetry.
+    * Links: Target URIs, structural tagging, alt text, ambiguous phrase check.
+    * Forms: Field names, types, accessible tooltips (/TU), required flags.
+    * Bookmarks: Outline hierarchy, heading levels, and target page resolution.
+
+* Batch PDF Scanning:
+    Scan entire folders of PDFs concurrently in the background, displaying
+    aggregate compliance scores and double-click document opening.
+
+* Multi-Format Report Export:
+    * PDF Report: Multi-page formal audit certificate via ReportLab.
+    * HTML Report: Responsive, standalone report with interactive filters.
+    * JSON Export: Complete machine-readable audit data with metadata.
+    * CSV Export: Spreadsheet-ready findings table with UTF-8 BOM.
+
+4. AUTOMATED RULES INVENTORY (41 RULES)
+--------------------------------------------------------------------------------
+* PDF/UA-1 Suite (22 Rules):
+    Syntax, Tagged PDF, StructTreeRoot, ParentTree, StructParents, Role Mapping,
+    Font Embedding, ToUnicode, Unicode PUA, Replacement Characters, Heading
+    Hierarchy, Lists (L>LI>Lbl/LBody), Tables (TH headers), Empty Elements,
+    Artifacts, Annotations, Alt Text, Language, DisplayDocTitle, Metadata.
+
+* WCAG 2.1/2.2 AA Suite (13 Rules):
+    Text Alternatives (1.1.1), Info & Relationships (1.3.1), Contrast (1.4.3),
+    Keyboard Tab Order (2.1.1), Navigable/Headings (2.4.1), Focus Order (2.4.3),
+    Link Purpose (2.4.4), Page Titled (2.4.2), Language of Page (3.1.1),
+    Input Assistance/Tooltips (3.3.2), Compatible Name/Role (4.1.2).
+
+* Quality & Ergonomics Suite (3 Rules):
+    Heading level skipped jumps, Table matrix regularity, Meaningful link text.
+
+* AI & Heuristics Suite (3 Rules):
+    Semantic alt-text evaluation, Flesch Reading Ease cognitive readability,
+    Structural outline navigation consistency.
+
+5. KNOWN LIMITATIONS & HONEST BOUNDARIES
+--------------------------------------------------------------------------------
+* Password-Protected PDFs:
+    If a document requires a password to open, the application prompts:
+    "Password required — analysis cannot continue until the document is unlocked."
+    You may enter the password in the secure prompt to analyze the document.
+    Brute-forcing or bypassing PDF encryption is intentionally not supported.
+
+* Flattened / Rasterized Text Contrast:
+    When text has been flattened into a pixel bitmap without vector glyph paths,
+    color contrast cannot be mathematically verified and is designated as
+    MANUAL REVIEW with inspection guidance.
+
+* Audio / Video Synchronization:
+    Rich media annotations containing multimedia tracks require human review
+    to confirm caption accuracy and audio description timing.
+
+================================================================================
+"""
+        with open(readme_path, "w", encoding="utf-8") as f:
+            f.write(readme_content.strip() + "\n")
+        print(f"Generated: {readme_path}")
     else:
         print("ERROR: Output executable not found in dist/")
         sys.exit(1)

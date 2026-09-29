@@ -11,7 +11,7 @@ import subprocess
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
     QFileDialog, QMessageBox, QProgressBar, QLabel, QSplitter,
-    QStatusBar, QApplication
+    QStatusBar, QApplication, QInputDialog, QLineEdit
 )
 from PySide6.QtCore import Qt, QThread, Signal, QObject
 from PySide6.QtGui import QDragEnterEvent, QDropEvent, QIcon
@@ -48,14 +48,15 @@ class AuditWorker(QObject):
     progress = Signal(int, int, str)   # (current, total, message)
     error = Signal(str)
 
-    def __init__(self, filepath: str):
+    def __init__(self, filepath: str, password: Optional[str] = None):
         super().__init__()
         self.filepath = filepath
+        self.password = password
 
     def run(self):
         try:
             self.progress.emit(1, 10, "Parsing PDF structure and dictionaries...")
-            parser = DocumentParser(self.filepath)
+            parser = DocumentParser(self.filepath, password=self.password)
             doc_model = parser.parse()
 
             self.progress.emit(3, 10, "Executing PDF/UA, WCAG, and Quality checks...")
@@ -81,6 +82,7 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
 
         self.current_filepath: Optional[str] = None
+        self.current_password: Optional[str] = None
         self.current_doc: Optional[PDFDocumentModel] = None
         self.current_report: Optional[AuditReport] = None
         self.audit_thread: Optional[QThread] = None
@@ -228,19 +230,23 @@ class MainWindow(QMainWindow):
         if self.current_filepath and os.path.exists(self.current_filepath):
             self.load_pdf_file(self.current_filepath)
 
-    def load_pdf_file(self, filepath: str):
+    def load_pdf_file(self, filepath: str, password: Optional[str] = None):
         """Launches the background audit thread to inspect the PDF."""
         self.current_filepath = filepath
+        self.current_password = password
         self.lbl_status.setText(f"Analyzing {os.path.basename(filepath)}...")
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
 
-        # Open in PDF viewer canvas immediately for snappy feedback
-        self.pdf_viewer.load_document(filepath)
+        # Open in PDF viewer canvas for snappy feedback
+        try:
+            self.pdf_viewer.load_document(filepath, password=password)
+        except Exception:
+            pass
 
         # Start background worker
         self.audit_thread = QThread()
-        self.worker = AuditWorker(filepath)
+        self.worker = AuditWorker(filepath, password=password)
         self.worker.moveToThread(self.audit_thread)
 
         self.audit_thread.started.connect(self.worker.run)
@@ -262,6 +268,15 @@ class MainWindow(QMainWindow):
     def _on_audit_finished(self, doc: PDFDocumentModel, report: AuditReport):
         self.current_doc = doc
         self.current_report = report
+
+        # Load into PDF viewer with unlocked credentials if needed
+        try:
+            self.pdf_viewer.load_document(doc.filepath, password=self.current_password)
+        except Exception:
+            pass
+        # Clear password from memory immediately
+        self.current_password = None
+
         self.progress_bar.setVisible(False)
         self.lbl_status.setText(
             f"Audit Completed: {doc.filename} — Score: {report.compliance_score}% "
@@ -286,6 +301,24 @@ class MainWindow(QMainWindow):
     def _on_audit_error(self, err_msg: str):
         self.progress_bar.setVisible(False)
         self.lbl_status.setText("Audit failed.")
+
+        # Password required prompt
+        if "Password required" in err_msg and self.current_filepath:
+            pwd, ok = QInputDialog.getText(
+                self, "Password Required",
+                "Password required — analysis cannot continue until the document is unlocked.\n\nEnter document password:",
+                QLineEdit.Password
+            )
+            if ok and pwd:
+                self.load_pdf_file(self.current_filepath, password=pwd)
+                return
+            else:
+                QMessageBox.warning(
+                    self, "Password Required",
+                    "Password required — analysis cannot continue until the document is unlocked."
+                )
+                return
+
         QMessageBox.critical(self, "Audit Error", f"Failed to analyze PDF:\n{err_msg}")
 
     # --- Navigation & Inter-Widget Coordination ---

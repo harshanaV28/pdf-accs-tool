@@ -29,10 +29,11 @@ ARTIFACT_PATTERN = re.compile(r"/Artifact(?:\s*<<[^>]*?>>)?\s*B[DM]C", re.DOTALL
 class DocumentParser:
     """Parses a PDF file into a complete, in-memory PDFDocumentModel."""
 
-    def __init__(self, filepath: str):
+    def __init__(self, filepath: str, password: Optional[str] = None):
         self.filepath = filepath
         self.filename = os.path.basename(filepath)
         self.filesize = os.path.getsize(filepath) if os.path.exists(filepath) else 0
+        self.password = password
 
     def parse(self) -> PDFDocumentModel:
         """Executes full document extraction."""
@@ -40,9 +41,9 @@ class DocumentParser:
             raise FileNotFoundError(f"PDF file does not exist: {self.filepath}")
 
         try:
-            pike_doc = pikepdf.open(self.filepath)
+            pike_doc = pikepdf.open(self.filepath, password=self.password or "")
         except pikepdf.PasswordError:
-            raise PermissionError(f"PDF '{self.filename}' is encrypted and password-protected. Please unlock the PDF before inspecting.")
+            raise PermissionError("Password required — analysis cannot continue until the document is unlocked.")
         except pikepdf.PdfError as pe:
             raise ValueError(f"PDF '{self.filename}' is corrupt or malformed: {pe}")
         except Exception as e:
@@ -51,9 +52,16 @@ class DocumentParser:
         try:
             fitz_doc = pymupdf.open(self.filepath)
             if fitz_doc.needs_pass:
-                pike_doc.close()
-                fitz_doc.close()
-                raise PermissionError(f"PDF '{self.filename}' is encrypted and requires a password to view.")
+                if self.password:
+                    auth_success = fitz_doc.authenticate(self.password)
+                    if not auth_success:
+                        pike_doc.close()
+                        fitz_doc.close()
+                        raise PermissionError("Password required — analysis cannot continue until the document is unlocked.")
+                else:
+                    pike_doc.close()
+                    fitz_doc.close()
+                    raise PermissionError("Password required — analysis cannot continue until the document is unlocked.")
         except PermissionError:
             raise
         except Exception as e:

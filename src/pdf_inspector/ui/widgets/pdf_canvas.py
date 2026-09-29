@@ -174,7 +174,7 @@ class PDFCanvas(QWidget):
         self.scroll_area.setWidget(self.page_display)
         layout.addWidget(self.scroll_area)
 
-    def load_document(self, filepath: str):
+    def load_document(self, filepath: str, password: Optional[str] = None):
         """Loads a PDF document into the viewer."""
         if self.doc:
             try:
@@ -183,6 +183,9 @@ class PDFCanvas(QWidget):
                 pass
 
         self.doc = pymupdf.open(filepath)
+        if self.doc.needs_pass and password:
+            self.doc.authenticate(password)
+
         self.current_page_idx = 0
         self.rotation = 0
         self.highlight_bbox = None

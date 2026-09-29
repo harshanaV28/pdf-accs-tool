@@ -252,7 +252,7 @@ def test_malformed_pdf_error_handling(temp_dir):
 
 
 def test_encrypted_pdf_error_handling(temp_dir):
-    """Verifies that password-encrypted PDFs raise a clean PermissionError."""
+    """Verifies that password-encrypted PDFs require password and parse successfully once unlocked."""
     enc_pdf_path = os.path.join(temp_dir, "encrypted_protected.pdf")
     pdoc = pikepdf.new()
     pdoc.add_blank_page(page_size=(300, 300))
@@ -262,10 +262,19 @@ def test_encrypted_pdf_error_handling(temp_dir):
     )
     pdoc.close()
 
+    # Case 1: Without password -> must raise exact required notification
     parser = DocumentParser(enc_pdf_path)
     with pytest.raises(PermissionError) as excinfo:
         parser.parse()
-    assert "password" in str(excinfo.value).lower()
+    assert "password required" in str(excinfo.value).lower()
+    assert "analysis cannot continue until the document is unlocked" in str(excinfo.value).lower()
+
+    # Case 2: With valid password -> successfully unlocks and parses
+    unlocked_parser = DocumentParser(enc_pdf_path, password="secretUserPass")
+    doc_model = unlocked_parser.parse()
+    assert doc_model is not None
+    assert doc_model.page_count == 1
+    assert doc_model.is_encrypted is True
 
 
 def test_batch_scanner_functionality(qapp, temp_dir):
