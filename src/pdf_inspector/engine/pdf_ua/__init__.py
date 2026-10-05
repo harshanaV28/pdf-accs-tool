@@ -5,13 +5,13 @@ from .font_rules import FontEmbeddingRule, FontToUnicodeRule
 from .content_rules import TaggedPDFRule, ContentTaggedRule
 from .embedded_files_rules import EmbeddedFilesAccessibilityRule
 from .language_rules import DocumentLanguageRule, StructureLanguageRule
-from .structure_rules import StructureTreeIntegrityRule, StructureNestingRule, EmptyStructureElementsRule
+from .structure_rules import StructureTreeIntegrityRule, StructureNestingRule, EmptyStructureElementsRule, FigureBoundingBoxRule
 from .role_map_rules import RoleMappingValidityRule
 from .alt_text_rules import FigureAlternativeTextRule
 from .metadata_rules import MetadataCompletenessRule
 from .document_settings_rules import DisplayDocTitleRule
 from .parent_tree_rules import ParentTreeIntegrityRule
-from .artifact_rules import ArtifactInStructureTreeRule
+from .artifact_rules import ArtifactInStructureTreeRule, ArtifactInsideTaggedContentRule
 from .list_rules import ListStructureHierarchyRule
 from .table_rules import TableStructureHeadersRule
 from .annotation_rules import AnnotationTaggedRule
@@ -26,6 +26,7 @@ PDF_UA_RULES = [
     TaggedPDFRule(),
     ContentTaggedRule(),
     ArtifactInStructureTreeRule(),
+    ArtifactInsideTaggedContentRule(),
     AnnotationTaggedRule(),
     EmbeddedFilesAccessibilityRule(),
     DocumentLanguageRule(),
@@ -33,6 +34,7 @@ PDF_UA_RULES = [
     StructureTreeIntegrityRule(),
     ParentTreeIntegrityRule(),
     StructureNestingRule(),
+    FigureBoundingBoxRule(),
     ListStructureHierarchyRule(),
     TableStructureHeadersRule(),
     EmptyStructureElementsRule(),
@@ -52,6 +54,7 @@ __all__ = [
     "TaggedPDFRule",
     "ContentTaggedRule",
     "ArtifactInStructureTreeRule",
+    "ArtifactInsideTaggedContentRule",
     "AnnotationTaggedRule",
     "EmbeddedFilesAccessibilityRule",
     "DocumentLanguageRule",

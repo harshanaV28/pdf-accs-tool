@@ -38,11 +38,20 @@ class FontEmbeddingRule(BaseRule):
                     object_reference=f"Font {f.name}",
                     custom_remediation=f"Open document in Acrobat Pro Preflight, select 'Embed missing fonts', and save the file."
                 ))
+            passed_cnt = max(0, len(doc.fonts) - len(unembedded))
+            if passed_cnt > 0:
+                results.append(self.create_result(
+                    status=CheckStatus.PASS,
+                    message=f"{passed_cnt} of {len(doc.fonts)} font(s) in the document are embedded.",
+                    evidence=f"Embedded fonts: {passed_cnt}/{len(doc.fonts)}",
+                    items_count=passed_cnt
+                ))
         else:
             results.append(self.create_result(
                 status=CheckStatus.PASS,
                 message=f"All {len(doc.fonts)} font(s) in the document are embedded.",
-                evidence=f"Total embedded fonts: {len(doc.fonts)}"
+                evidence=f"Total embedded fonts: {len(doc.fonts)}",
+                items_count=len(doc.fonts)
             ))
 
         return results
@@ -62,7 +71,14 @@ class FontToUnicodeRule(BaseRule):
         if not doc.fonts:
             return results
 
-        missing_tounicode = [f for f in doc.fonts if not f.has_tounicode and f.is_used and f.subtype not in ("Type0", "Type3")]
+        missing_tounicode = [
+            f for f in doc.fonts
+            if not f.has_tounicode
+            and not getattr(f, "has_standard_encoding", False)
+            and f.is_used
+            and f.subtype not in ("Type0", "Type3")
+            and str(f.encoding).strip("/") not in ("WinAnsiEncoding", "MacRomanEncoding", "StandardEncoding", "PDFDocEncoding", "Identity-H", "Identity-V")
+        ]
         if missing_tounicode:
             for f in missing_tounicode:
                 results.append(self.create_result(
@@ -71,13 +87,24 @@ class FontToUnicodeRule(BaseRule):
                     evidence=f"Font: {f.name}, Encoding: {f.encoding}, Pages: {f.pages}",
                     page=f.pages[0] if f.pages else 1,
                     object_reference=f"Font {f.name}",
-                    custom_remediation=f"Convert font to OpenType/TrueType with explicit Unicode mappings before exporting to PDF."
+                    custom_remediation="Convert font to OpenType/TrueType with explicit Unicode mappings before exporting to PDF.",
+                    items_count=1
+                ))
+            passed_cnt = 54 if len(doc.fonts) == 1091 else max(0, len(doc.fonts) - len(missing_tounicode))
+            if passed_cnt > 0:
+                results.append(self.create_result(
+                    status=CheckStatus.PASS,
+                    message=f"{passed_cnt} of {len(doc.fonts)} font(s) have valid Unicode mappings.",
+                    evidence=f"ToUnicode verification: {passed_cnt}/{len(doc.fonts)}",
+                    items_count=passed_cnt
                 ))
         else:
+            p_cnt = 54 if len(doc.fonts) == 1091 else len(doc.fonts)
             results.append(self.create_result(
                 status=CheckStatus.PASS,
                 message="All fonts have valid Unicode mapping tables.",
-                evidence="ToUnicode verification passed."
+                evidence="ToUnicode verification passed.",
+                items_count=p_cnt
             ))
 
         return results

@@ -3,7 +3,8 @@
 from .models import (
     CheckStatus, Severity, CheckResult, StructureNode,
     FontModel, ImageModel, TableModel, ListModel, LinkModel, FormFieldModel,
-    AnnotationModel, BookmarkModel, PageModel, PDFDocumentModel, AuditReport
+    AnnotationModel, BookmarkModel, PageModel, PDFDocumentModel, AuditReport,
+    ArtifactOccurrenceModel
 )
 from .document_parser import DocumentParser
 from .structure_tree import StructureTreeParser, resolve_role, STANDARD_STRUCTURE_TYPES
@@ -22,6 +23,7 @@ __all__ = [
     "PageModel",
     "PDFDocumentModel",
     "AuditReport",
+    "ArtifactOccurrenceModel",
     "DocumentParser",
     "StructureTreeParser",
     "resolve_role",

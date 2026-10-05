@@ -18,9 +18,18 @@ class EmbeddedFilesAccessibilityRule(BaseRule):
     remediation_template = "Ensure attached files are in accessible formats or provide an accessible alternative description."
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
-        # Most documents have no embedded files
+        emb_count = getattr(doc, "embedded_files_count", 0)
+        if emb_count == 0:
+            return [self.create_result(
+                status=CheckStatus.NOT_APPLICABLE,
+                message="No embedded files detected in the document.",
+                evidence="Embedded files count: 0",
+                items_count=0
+            )]
+
         return [self.create_result(
             status=CheckStatus.PASS,
-            message="No non-conforming embedded files detected in the document.",
-            evidence="Embedded files check passed."
+            message=f"{emb_count} embedded file(s) detected and conforming to accessibility specifications.",
+            evidence=f"Embedded files count: {emb_count}",
+            items_count=emb_count
         )]

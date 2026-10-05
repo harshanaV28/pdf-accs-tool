@@ -55,10 +55,10 @@ class MetadataCompletenessRule(BaseRule):
         # 3. PDF/UA Identifier
         if not doc.pdfua_identifier_present:
             results.append(self.create_result(
-                status=CheckStatus.WARNING,
+                status=CheckStatus.FAIL,
                 message="PDF/UA identification flag (pdfuaid:part=1) is missing from XMP metadata.",
                 evidence="XMP lacks <pdfuaid:part>1</pdfuaid:part> namespace declaration.",
-                custom_severity=Severity.MEDIUM,
+                custom_severity=Severity.HIGH,
                 custom_remediation="Add PDF/UA identifier using Acrobat Preflight or your PDF/UA export setting."
             ))
         else:

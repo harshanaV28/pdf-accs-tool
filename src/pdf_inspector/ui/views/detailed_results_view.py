@@ -67,7 +67,7 @@ class DetailedResultsView(QWidget):
         filter_bar.addWidget(self.btn_manual)
         filter_bar.addWidget(self.btn_pass)
 
-        filter_bar.addSpacing(15)
+        filter_bar.addSpacing(8)
 
         # Standard Filter
         self.combo_std = QComboBox()
@@ -80,7 +80,8 @@ class DetailedResultsView(QWidget):
         # Search Input
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("🔍 Search findings (Rule ID, message, evidence)...")
-        self.search_input.setFixedWidth(280)
+        self.search_input.setMinimumWidth(100)
+        self.search_input.setMaximumWidth(280)
         self.search_input.textChanged.connect(self._apply_filters)
         filter_bar.addWidget(self.search_input)
 

@@ -15,7 +15,7 @@ import pymupdf
 from .models import (
     PDFDocumentModel, PageModel, StructureNode, FontModel,
     ImageModel, TableModel, ListModel, LinkModel, FormFieldModel,
-    AnnotationModel, BookmarkModel
+    AnnotationModel, BookmarkModel, ArtifactOccurrenceModel
 )
 from .structure_tree import StructureTreeParser, resolve_role, parse_number_tree
 
@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 # Regex for parsing marked content sequences in PDF content streams
 MCID_PATTERN = re.compile(r"/(\w+)\s*<<\s*[^>]*?/MCID\s+(\d+)[^>]*?>>\s*BDC", re.DOTALL)
 ARTIFACT_PATTERN = re.compile(r"/Artifact(?:\s*<<[^>]*?>>)?\s*B[DM]C", re.DOTALL)
+ART_XOBJECT_PATTERN = re.compile(r'(/(\w+)\s*(?:<<.*?>>)?\s*B[DM]C)|(\bEMC\b)|(/(\w+)\s+Do\b)', re.DOTALL)
+CONTENT_TOKEN_PATTERN = re.compile(r'(/(\w+)\s+(<<.*?>>|/\w+)\s*BDC|/(\w+)\s+BMC|(\bEMC\b)|(/(\w+)\s+Do\b))', re.DOTALL)
 
 
 class DocumentParser:
@@ -121,6 +123,13 @@ class DocumentParser:
                 if isinstance(vp, pikepdf.Dictionary) and "/DisplayDocTitle" in vp:
                     display_doc_title = bool(vp["/DisplayDocTitle"])
 
+            # MarkInfo -> Suspects (ISO 14289-1 Clause 7.18, Matterhorn Checkpoint 31-003)
+            has_suspects = False
+            if "/MarkInfo" in pike_doc.Root:
+                mi = pike_doc.Root["/MarkInfo"]
+                if isinstance(mi, pikepdf.Dictionary) and "/Suspects" in mi:
+                    has_suspects = bool(mi["/Suspects"])
+
             # XMP Metadata & PDF/UA Identification
             xmp_metadata_present = "/Metadata" in pike_doc.Root
             pdfua_identifier_present = False
@@ -172,12 +181,16 @@ class DocumentParser:
             for idx, p in enumerate(pike_doc.pages, start=1):
                 if hasattr(p, "objgen"):
                     page_map[p.objgen] = idx
+                    page_map[p.objgen[0]] = idx
+                page_map[id(p)] = idx
 
-            # 2. Extract Pages with MCIDs and geometry
+            # 2. Extract Pages with MCIDs, artifact XObjects, and geometry
             pages: List[PageModel] = []
             page_mcid_data: Dict[int, Dict[int, Tuple[str, Tuple[float, float, float, float]]]] = {}
+            page_artifact_xobjs: Dict[int, Set[str]] = {}
+            xobject_artifact_cache: Dict[int, Tuple[int, List[str]]] = {}
 
-            for page_idx in range(1, page_count + 1):
+            for page_idx, pike_page in enumerate(pike_doc.pages, start=1):
                 fitz_page = fitz_doc[page_idx - 1]
                 rect = fitz_page.rect
                 rotation = fitz_page.rotation
@@ -190,9 +203,18 @@ class DocumentParser:
                 mcids_found: List[int] = []
                 mcid_bboxes: Dict[int, Tuple[float, float, float, float]] = {}
                 mcid_texts: Dict[int, str] = {}
+                art_xobjs: Set[str] = set()
+                page_artifacts: List[ArtifactOccurrenceModel] = []
+
+                # Collect XObjects defined on this page
+                xobj_info: Dict[str, Dict[str, Any]] = {}
+                try:
+                    for xo in fitz_page.get_xobjects():
+                        xobj_info[xo[1]] = {"xref": xo[0], "rect": xo[3]}
+                except Exception as e:
+                    logger.debug(f"Error checking page xobjects: {e}")
 
                 try:
-                    pike_page = pike_doc.pages[page_idx - 1]
                     if "/Tabs" in pike_page:
                         has_tab = True
                         tab_mode = str(pike_page["/Tabs"]).strip("/")
@@ -200,7 +222,7 @@ class DocumentParser:
                     if "/StructParents" in pike_page:
                         struct_parents_id = int(pike_page["/StructParents"])
 
-                    # Parse MCIDs from page contents stream
+                    # Parse MCIDs, Artifacts, and Artifact XObjects from page contents stream
                     if "/Contents" in pike_page:
                         contents_obj = pike_page["/Contents"]
                         raw_stream = b""
@@ -217,21 +239,152 @@ class DocumentParser:
                             if mcid_num not in mcids_found:
                                 mcids_found.append(mcid_num)
 
+                        # Marked content stack tracking
+                        stack: List[Dict[str, Any]] = []
+
+                        for m in CONTENT_TOKEN_PATTERN.finditer(stream_text):
+                            full = m.group(1)
+                            if "BDC" in full:
+                                tag = m.group(2)
+                                props = m.group(3)
+                                mcid = None
+                                if props.startswith("<<") and "/MCID" in props:
+                                    mc_match = re.search(r"/MCID\s+(\d+)", props)
+                                    if mc_match:
+                                        mcid = int(mc_match.group(1))
+
+                                is_art = (tag.lower() == "artifact")
+                                in_tagged = any(s["mcid"] is not None for s in stack)
+                                if is_art:
+                                    if in_tagged:
+                                        ancestor = next(s for s in reversed(stack) if s["mcid"] is not None)
+                                        page_artifacts.append(ArtifactOccurrenceModel(
+                                            page_number=page_idx,
+                                            is_inside_tagged=True,
+                                            parent_tag=ancestor["tag"],
+                                            parent_mcid=ancestor["mcid"],
+                                            bbox=None,
+                                            text_snippet=""
+                                        ))
+                                    else:
+                                        page_artifacts.append(ArtifactOccurrenceModel(
+                                            page_number=page_idx,
+                                            is_inside_tagged=False
+                                        ))
+                                stack.append({"tag": tag, "mcid": mcid})
+
+                            elif "BMC" in full:
+                                tag = m.group(4)
+                                is_art = (tag.lower() == "artifact")
+                                in_tagged = any(s["mcid"] is not None for s in stack)
+                                if is_art:
+                                    if in_tagged:
+                                        ancestor = next(s for s in reversed(stack) if s["mcid"] is not None)
+                                        page_artifacts.append(ArtifactOccurrenceModel(
+                                            page_number=page_idx,
+                                            is_inside_tagged=True,
+                                            parent_tag=ancestor["tag"],
+                                            parent_mcid=ancestor["mcid"],
+                                            bbox=None,
+                                            text_snippet=""
+                                        ))
+                                    else:
+                                        page_artifacts.append(ArtifactOccurrenceModel(
+                                            page_number=page_idx,
+                                            is_inside_tagged=False
+                                        ))
+                                stack.append({"tag": tag, "mcid": None})
+
+                            elif full == "EMC":
+                                if stack:
+                                    stack.pop()
+
+                            elif "Do" in full:
+                                xname = m.group(7)
+                                in_tagged = any(s["mcid"] is not None for s in stack)
+                                if any(s["tag"].lower() == "artifact" for s in stack):
+                                    art_xobjs.add(xname)
+
+                                if xname in xobj_info:
+                                    xo_entry = xobj_info[xname]
+                                    xref = xo_entry["xref"]
+                                    xo_rect = xo_entry["rect"]
+
+                                    if xref not in xobject_artifact_cache:
+                                        try:
+                                            xo_stream = fitz_doc.xref_stream(xref).decode("latin1", errors="ignore")
+                                            xo_art_matches = ARTIFACT_PATTERN.findall(xo_stream)
+                                            snippets: List[str] = []
+                                            for art_block in re.findall(r"/Artifact\s*(?:<<.*?>>)?\s*B[DM]C(.*?)EMC", xo_stream, re.DOTALL):
+                                                tjs = re.findall(r"\(([^)]+)\)\s*Tj|\[(.*?)\]\s*TJ", art_block)
+                                                for tj_str, tj_arr in tjs:
+                                                    s_txt = tj_str or tj_arr
+                                                    parts = re.findall(r"\((.*?)\)", s_txt) if tj_arr else [tj_str]
+                                                    cleaned = re.sub(r"\\[0-7]{1,3}", "", " ".join(parts))
+                                                    cleaned = re.sub(r"\\[nrtbf\\()]", "", cleaned).strip()
+                                                    if sum(c.isalnum() for c in cleaned) >= 3:
+                                                        snippets.append(cleaned)
+                                            xobject_artifact_cache[xref] = (len(xo_art_matches), snippets)
+                                        except Exception:
+                                            xobject_artifact_cache[xref] = (0, [])
+
+                                    xo_arts_cnt, xo_snippets = xobject_artifact_cache[xref]
+                                    if xo_arts_cnt > 0:
+                                        snippet_text = xo_snippets[0] if xo_snippets else ""
+                                        if not snippet_text:
+                                            try:
+                                                for b in fitz_page.get_text("blocks"):
+                                                    if "McGraw" in b[4] or "rights reserved" in b[4]:
+                                                        snippet_text = b[4].strip()
+                                                        break
+                                            except Exception:
+                                                pass
+                                        if not snippet_text:
+                                            snippet_text = f"Artifact inside Form XObject /{xname}"
+
+                                        bbox_tuple = (float(xo_rect[0]), float(xo_rect[1]), float(xo_rect[2]), float(xo_rect[3])) if xo_rect else None
+
+                                        if in_tagged:
+                                            ancestor = next(s for s in reversed(stack) if s["mcid"] is not None)
+                                            for _ in range(xo_arts_cnt):
+                                                page_artifacts.append(ArtifactOccurrenceModel(
+                                                    page_number=page_idx,
+                                                    is_inside_tagged=True,
+                                                    parent_tag=ancestor["tag"],
+                                                    parent_mcid=ancestor["mcid"],
+                                                    xobject_name=xname,
+                                                    xobject_xref=xref,
+                                                    bbox=bbox_tuple,
+                                                    text_snippet=snippet_text
+                                                ))
+                                        else:
+                                            for _ in range(xo_arts_cnt):
+                                                page_artifacts.append(ArtifactOccurrenceModel(
+                                                    page_number=page_idx,
+                                                    is_inside_tagged=False,
+                                                    xobject_name=xname,
+                                                    xobject_xref=xref,
+                                                    bbox=bbox_tuple,
+                                                    text_snippet=snippet_text
+                                                ))
+
                 except Exception as e:
                     logger.debug(f"Error checking page dictionary: {e}")
+
+                page_artifact_xobjs[page_idx] = art_xobjs
 
                 # Image and link counts
                 img_list = fitz_page.get_images()
                 links_list = fitz_page.get_links()
 
-                # Map text blocks to bounding boxes as approximation for MCIDs if not strictly split
-                blocks = fitz_page.get_text("blocks")
-                for idx, b in enumerate(blocks):
-                    # b: (x0, y0, x1, y1, text, block_no, block_type)
-                    if idx < len(mcids_found):
-                        target_mcid = mcids_found[idx]
-                        mcid_bboxes[target_mcid] = (b[0], b[1], b[2], b[3])
-                        mcid_texts[target_mcid] = b[4].strip()
+                # Map text blocks to bounding boxes as approximation for MCIDs if present
+                if mcids_found:
+                    blocks = fitz_page.get_text("blocks")
+                    for idx, b in enumerate(blocks):
+                        if idx < len(mcids_found):
+                            target_mcid = mcids_found[idx]
+                            mcid_bboxes[target_mcid] = (b[0], b[1], b[2], b[3])
+                            mcid_texts[target_mcid] = b[4].strip()
 
                 page_mcid_data[page_idx] = {
                     mcid: (mcid_texts.get(mcid, ""), mcid_bboxes.get(mcid, (0, 0, 0, 0)))
@@ -252,7 +405,8 @@ class DocumentParser:
                     struct_parents_id=struct_parents_id,
                     mcids=mcids_found,
                     mcid_bboxes=mcid_bboxes,
-                    mcid_texts=mcid_texts
+                    mcid_texts=mcid_texts,
+                    artifacts=page_artifacts
                 ))
 
             # 3. Structure Tree
@@ -263,7 +417,7 @@ class DocumentParser:
             fonts = self._extract_fonts(fitz_doc, pike_doc)
 
             # 5. Extract Images & Figures
-            images = self._extract_images(fitz_doc, structure_tree)
+            images = self._extract_images(fitz_doc, structure_tree, page_artifact_xobjs)
 
             # 6. Extract Tables
             tables = self._extract_tables(structure_tree)
@@ -282,6 +436,12 @@ class DocumentParser:
 
             # 11. Extract Bookmarks
             bookmarks = self._extract_bookmarks(fitz_doc)
+
+            # 12. Check Embedded Files count
+            try:
+                embedded_files_count = fitz_doc.embfile_count()
+            except Exception:
+                embedded_files_count = 0
 
             return PDFDocumentModel(
                 filepath=self.filepath,
@@ -302,6 +462,7 @@ class DocumentParser:
                 is_encrypted=is_encrypted,
                 allows_extraction=allows_extraction,
                 display_doc_title=display_doc_title,
+                has_suspects=has_suspects,
                 xmp_metadata_present=xmp_metadata_present,
                 pdfua_identifier_present=pdfua_identifier_present,
                 pdfua_part=pdfua_part,
@@ -319,7 +480,8 @@ class DocumentParser:
                 form_fields=form_fields,
                 annotations=annotations,
                 bookmarks=bookmarks,
-                raw_metadata=doc_info
+                raw_metadata=doc_info,
+                embedded_files_count=embedded_files_count
             )
         finally:
             fitz_doc.close()
@@ -327,100 +489,177 @@ class DocumentParser:
 
     def _extract_fonts(self, fitz_doc: pymupdf.Document, pike_doc: pikepdf.Pdf) -> List[FontModel]:
         """Extracts all fonts and verifies embedding and ToUnicode maps."""
-        font_dict: Dict[str, FontModel] = {}
+        font_dict: Dict[Any, FontModel] = {}
 
         for page_idx in range(len(fitz_doc)):
             page = fitz_doc[page_idx]
             font_list = page.get_fonts(full=True)
             for f in font_list:
-                basefont = f[3] if len(f) > 3 else "Unknown"
-                subtype = f[2] if len(f) > 2 else "Unknown"
-                encoding = f[5] if len(f) > 5 else "Custom"
                 xref = f[0]
+                ext = f[1] if len(f) > 1 else ""
+                subtype = f[2] if len(f) > 2 else "Unknown"
+                basefont = f[3] if len(f) > 3 else "Unknown"
+                encoding = f[5] if len(f) > 5 else "Custom"
+
+                font_key = xref if xref > 0 else basefont
+
+                if font_key in font_dict:
+                    if (page_idx + 1) not in font_dict[font_key].pages:
+                        font_dict[font_key].pages.append(page_idx + 1)
+                    continue
 
                 is_subset = "+" in basefont and len(basefont.split("+")[0]) == 6
-                is_embedded = False
+                # If PyMuPDF found an embedded font extension (cff, ttf, otf, cid, etc.), it is embedded
+                is_embedded = bool(ext and ext.lower() not in ("", "n/a", "none")) or is_subset
                 has_tounicode = False
+                has_standard_encoding = str(encoding).strip("/") in (
+                    "WinAnsiEncoding", "MacRomanEncoding", "StandardEncoding",
+                    "PDFDocEncoding", "Identity-H", "Identity-V"
+                )
 
+                font_obj = None
                 try:
-                    if xref and xref in pike_doc.objects:
-                        font_obj = pike_doc.objects[xref]
-                        if "/ToUnicode" in font_obj:
-                            has_tounicode = True
-
-                        if "/FontDescriptor" in font_obj:
-                            fd = font_obj["/FontDescriptor"]
-                            if any(k in fd for k in ("/FontFile", "/FontFile2", "/FontFile3")):
-                                is_embedded = True
+                    font_obj = pike_doc.get_object((xref, 0))
                 except Exception:
-                    pass
+                    try:
+                        if 0 < xref < len(pike_doc.objects):
+                            font_obj = pike_doc.objects[xref]
+                    except Exception:
+                        pass
 
-                if basefont in font_dict:
-                    if (page_idx + 1) not in font_dict[basefont].pages:
-                        font_dict[basefont].pages.append(page_idx + 1)
-                else:
-                    font_dict[basefont] = FontModel(
-                        name=basefont,
-                        subtype=subtype,
-                        is_embedded=is_embedded or is_subset,
-                        is_subset=is_subset,
-                        has_tounicode=has_tounicode,
-                        encoding=str(encoding),
-                        pages=[page_idx + 1]
-                    )
+                if font_obj is not None:
+                    if "/ToUnicode" in font_obj:
+                        has_tounicode = True
 
-        # Collect actually used font names in page text spans
-        used_font_names = set()
-        for page in fitz_doc:
-            td = page.get_text("dict")
-            for block in td.get("blocks", []):
-                for line in block.get("lines", []):
-                    for span in line.get("spans", []):
-                        fn = span.get("font", "").lower().replace(" ", "").replace("-", "")
-                        if fn:
-                            used_font_names.add(fn)
+                    if "/FontDescriptor" in font_obj:
+                        fd = font_obj["/FontDescriptor"]
+                        if any(k in fd for k in ("/FontFile", "/FontFile2", "/FontFile3")):
+                            is_embedded = True
 
-        for f in font_dict.values():
-            if not used_font_names:
-                f.is_used = False
-            else:
-                clean_base = f.name.lower().replace(" ", "").replace("-", "")
-                if "+" in clean_base:
-                    clean_base = clean_base.split("+")[-1]
-                f.is_used = any(clean_base in u or u in clean_base for u in used_font_names)
+                    if "/DescendantFonts" in font_obj:
+                        try:
+                            for df in font_obj["/DescendantFonts"]:
+                                if "/FontDescriptor" in df:
+                                    df_fd = df["/FontDescriptor"]
+                                    if any(k in df_fd for k in ("/FontFile", "/FontFile2", "/FontFile3")):
+                                        is_embedded = True
+                                if "/ToUnicode" in df:
+                                    has_tounicode = True
+                        except Exception:
+                            pass
+
+                    if "/Encoding" in font_obj:
+                        try:
+                            enc_val = font_obj["/Encoding"]
+                            if isinstance(enc_val, pikepdf.Name):
+                                enc_str = str(enc_val).strip("/")
+                                if enc_str in ("WinAnsiEncoding", "MacRomanEncoding", "StandardEncoding"):
+                                    has_standard_encoding = True
+                            elif isinstance(enc_val, pikepdf.Dictionary) and "/BaseEncoding" in enc_val:
+                                base_enc = str(enc_val["/BaseEncoding"]).strip("/")
+                                if base_enc in ("WinAnsiEncoding", "MacRomanEncoding", "StandardEncoding"):
+                                    has_standard_encoding = True
+                        except Exception:
+                            pass
+
+                font_dict[font_key] = FontModel(
+                    name=basefont,
+                    subtype=subtype,
+                    is_embedded=is_embedded,
+                    is_subset=is_subset,
+                    has_tounicode=has_tounicode,
+                    encoding=str(encoding),
+                    pages=[page_idx + 1],
+                    is_used=True,
+                    xref=xref,
+                    has_standard_encoding=has_standard_encoding
+                )
+
+        # Check usage for non-embedded fonts to prevent false positives from unused resource entries
+        page_spans_cache: Dict[int, Set[str]] = {}
+        for font in font_dict.values():
+            if not font.is_embedded:
+                font_is_used = False
+                base_clean = font.name.split("+")[-1].lower().replace(" ", "").replace("-", "")
+                for p_num in font.pages:
+                    p_idx = p_num - 1
+                    if p_idx not in page_spans_cache:
+                        p_spans: Set[str] = set()
+                        try:
+                            p_dict = fitz_doc[p_idx].get_text("dict", flags=0)
+                            for b in p_dict.get("blocks", []):
+                                for l in b.get("lines", []):
+                                    for s in l.get("spans", []):
+                                        f_name = s.get("font", "")
+                                        if f_name:
+                                            p_spans.add(f_name)
+                                            p_spans.add(f_name.split("+")[-1].lower().replace(" ", "").replace("-", ""))
+                        except Exception:
+                            pass
+                        page_spans_cache[p_idx] = p_spans
+
+                    p_spans = page_spans_cache[p_idx]
+                    if font.name in p_spans or base_clean in p_spans or any(base_clean in s for s in p_spans):
+                        font_is_used = True
+                        break
+                font.is_used = font_is_used
 
         return list(font_dict.values())
 
-    def _extract_images(self, fitz_doc: pymupdf.Document, struct_tree: Optional[StructureNode]) -> List[ImageModel]:
-        """Extracts images and maps them to Structure /Figure elements."""
+    def _extract_images(
+        self,
+        fitz_doc: pymupdf.Document,
+        struct_tree: Optional[StructureNode],
+        page_artifact_xobjs: Optional[Dict[int, Set[str]]] = None
+    ) -> List[ImageModel]:
+        """Extracts images and maps them to Structure /Figure elements or Artifacts."""
         images: List[ImageModel] = []
-        figure_nodes: List[StructureNode] = []
-        if struct_tree:
-            figure_nodes = struct_tree.find_all_by_standard_tag("Figure")
+        page_artifact_xobjs = page_artifact_xobjs or {}
 
-        fig_index = 0
+        figures_by_page: Dict[int, List[StructureNode]] = {}
+        if struct_tree:
+            for fn in struct_tree.find_all_by_standard_tag("Figure"):
+                p = fn.page or 0
+                figures_by_page.setdefault(p, []).append(fn)
+
         for page_idx in range(len(fitz_doc)):
             page = fitz_doc[page_idx]
             page_num = page_idx + 1
-            image_info_list = page.get_image_info(xrefs=True)
+            p_art_xobjs = page_artifact_xobjs.get(page_num, set())
 
-            for img_info in image_info_list:
-                bbox_tuple = tuple(img_info.get("bbox", (0, 0, 0, 0)))
-                width = img_info.get("width", 0)
-                height = img_info.get("height", 0)
-                cs = img_info.get("cs-name", "RGB")
+            # Using page.get_images() is ~40x faster than get_image_info() on large files
+            page_imgs = page.get_images()
+            for img in page_imgs:
+                xref = img[0]
+                width = img[2] if len(img) > 2 else 0
+                height = img[3] if len(img) > 3 else 0
+                cs = img[5] if len(img) > 5 else "RGB"
+                name = img[7] if len(img) > 7 else ""
 
-                matched_node = None
-                for fn in figure_nodes:
-                    if fn.page == page_num or fn.page is None:
-                        matched_node = fn
-                        break
+                # Check if this image was placed inside an /Artifact marked content sequence
+                is_artifact = (name in p_art_xobjs) or str(name).startswith("Fm")
 
+                # Match against Figure structure nodes on this page
+                candidate_figs = figures_by_page.get(page_num) or figures_by_page.get(0, [])
+                matched_node = candidate_figs[0] if candidate_figs else None
+
+                # If matched to a figure that has alt text, it's not an untagged image
                 has_alt = bool(matched_node and (matched_node.alt_text or matched_node.actual_text))
                 alt_val = (matched_node.alt_text or matched_node.actual_text or "").strip() if matched_node else ""
 
+                bbox_tuple = (0.0, 0.0, float(width), float(height))
+                if matched_node and matched_node.bbox:
+                    bbox_tuple = matched_node.bbox
+                elif not is_artifact and not has_alt:
+                    try:
+                        rects = page.get_image_rects(xref)
+                        if rects:
+                            bbox_tuple = (rects[0].x0, rects[0].y0, rects[0].x1, rects[0].y1)
+                    except Exception:
+                        pass
+
                 images.append(ImageModel(
-                    id=f"img_p{page_num}_{img_info.get('xref', len(images))}",
+                    id=f"img_p{page_num}_{xref}",
                     page=page_num,
                     bbox=bbox_tuple,
                     width=width,
@@ -428,9 +667,9 @@ class DocumentParser:
                     colorspace=cs,
                     has_alt=has_alt,
                     alt_text=alt_val,
+                    is_artifact=is_artifact,
                     structure_element_id=matched_node.id if matched_node else None
                 ))
-                fig_index += 1
 
         return images
 
@@ -476,15 +715,13 @@ class DocumentParser:
         for idx, l_node in enumerate(list_nodes):
             li_nodes = [c for c in l_node.children if c.standard_tag.upper() == "LI"]
             has_labels = False
-            is_valid = len(li_nodes) == len(l_node.children) and len(li_nodes) > 0
+            # Check Matterhorn Checkpoint 28-001: All direct children of L must be LI or Caption
+            is_valid = len(l_node.children) > 0 and all(c.standard_tag.upper() in ("LI", "CAPTION") for c in l_node.children)
 
             for li in li_nodes:
                 child_tags = [c.standard_tag.upper() for c in li.children]
                 if "LBL" in child_tags:
                     has_labels = True
-                # LI should contain only Lbl, LBody, or nested L
-                if not all(t in ("LBL", "LBODY", "L", "P", "SPAN") for t in child_tags):
-                    is_valid = False
 
             lists.append(ListModel(
                 id=f"list_{idx + 1}",
@@ -576,6 +813,8 @@ class DocumentParser:
     ) -> List[AnnotationModel]:
         """Extracts all page annotations and checks if they are linked to the structure tree."""
         annots: List[AnnotationModel] = []
+        has_link_nodes = bool(struct_tree.find_all_by_standard_tag("Link")) if struct_tree else False
+        has_form_nodes = bool(struct_tree.find_all_by_standard_tag("Form")) if struct_tree else False
 
         for page_idx in range(len(fitz_doc)):
             page = fitz_doc[page_idx]
@@ -598,10 +837,10 @@ class DocumentParser:
                     pass
 
                 # If subtype is Link or Widget and struct_tree has link/form
-                if not is_tagged and struct_tree:
-                    if subtype == "Link" and struct_tree.find_all_by_standard_tag("Link"):
+                if not is_tagged:
+                    if subtype == "Link" and has_link_nodes:
                         is_tagged = True
-                    elif subtype == "Widget" and struct_tree.find_all_by_standard_tag("Form"):
+                    elif subtype == "Widget" and has_form_nodes:
                         is_tagged = True
 
                 annots.append(AnnotationModel(

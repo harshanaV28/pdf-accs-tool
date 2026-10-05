@@ -4,7 +4,7 @@ from .dashboard_view import DashboardView
 from .checkpoints_view import CheckpointsView
 from .detailed_results_view import DetailedResultsView
 from .tag_tree_view import TagTreeView
-from .screen_reader_view import ScreenReaderView
+from .screen_reader_view import ScreenReaderView, SemanticReaderView
 from .metadata_view import MetadataView
 from .statistics_view import StatisticsView
 from .elements_view import ElementsView
@@ -16,6 +16,7 @@ __all__ = [
     "DetailedResultsView",
     "TagTreeView",
     "ScreenReaderView",
+    "SemanticReaderView",
     "MetadataView",
     "StatisticsView",
     "ElementsView",

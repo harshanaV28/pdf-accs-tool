@@ -1,54 +1,91 @@
 """
-Screen Reader Preview View
-Simulates how assistive technologies (NVDA, JAWS, VoiceOver) linearize, voice,
-and announce structural elements, headings, lists, tables, and alternative descriptions.
+Semantic Reading Preview View
+Simulates the document's logical reading sequence using PDF tags, structure elements,
+headings, lists, figures, alternative text and other accessibility metadata.
+This is a semantic preview and is not a replacement for testing with an actual screen reader.
 """
 
-from typing import Optional, List
+from typing import Optional
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextBrowser, QLabel,
-    QPushButton, QFrame
+    QPushButton, QFrame, QFileDialog, QMessageBox, QApplication
 )
 from PySide6.QtCore import Qt
-from ...core.models import PDFDocumentModel, StructureNode
+from ...core.models import PDFDocumentModel
+from ...engine.semantic_reading import SemanticReadingEngine, SemanticReadingResult
 
 
-class ScreenReaderView(QWidget):
-    """View presenting a linearized assistive technology speech transcript."""
+class SemanticReaderView(QWidget):
+    """View presenting the logical accessibility structure and semantic reading preview."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.engine = SemanticReadingEngine()
+        self.last_result: Optional[SemanticReadingResult] = None
+        self.current_doc: Optional[PDFDocumentModel] = None
         self._init_ui()
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(8)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
 
-        # Header Info Banner
+        # Header Card matching required specifications
         header = QFrame()
-        header.setStyleSheet("background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; padding: 10px;")
-        h_layout = QHBoxLayout(header)
-        h_layout.setContentsMargins(8, 4, 8, 4)
+        header.setStyleSheet("background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 12px;")
+        h_layout = QVBoxLayout(header)
+        h_layout.setContentsMargins(8, 6, 8, 6)
+        h_layout.setSpacing(6)
 
-        info_lbl = QLabel(
-            "🔊 <b>Screen Reader Preview (Linearized Speech Simulation)</b><br/>"
-            "<span style='color: #475569; font-size: 11px;'>"
-            "Demonstrates the exact reading order and speech announcements (tags, headings, lists, alt text) voiced by screen readers."
-            "</span>"
+        title_row = QHBoxLayout()
+        info_title = QLabel("📖 <b>Semantic Reading Preview</b>")
+        info_title.setStyleSheet("font-size: 14px; color: #1e3a8a; font-weight: 700;")
+        title_row.addWidget(info_title)
+        title_row.addStretch()
+
+        self.btn_copy = QPushButton("📋 Copy Text")
+        self.btn_copy.setToolTip("Copy semantic reading sequence as structured text")
+        self.btn_copy.setStyleSheet("font-size: 11px; padding: 3px 8px;")
+        self.btn_copy.clicked.connect(self._copy_text)
+        title_row.addWidget(self.btn_copy)
+
+        self.btn_export = QPushButton("💾 Export Transcript")
+        self.btn_export.setToolTip("Save semantic preview to file (.txt or .html)")
+        self.btn_export.setStyleSheet("font-size: 11px; padding: 3px 8px;")
+        self.btn_export.clicked.connect(self._export_transcript)
+        title_row.addWidget(self.btn_export)
+
+        h_layout.addLayout(title_row)
+
+        desc_lbl = QLabel(
+            "Simulates the document's logical reading sequence using PDF tags, structure elements, headings, lists, "
+            "figures, alternative text and other accessibility metadata. This is a semantic preview and is not a "
+            "replacement for testing with an actual screen reader."
         )
-        h_layout.addWidget(info_lbl)
+        desc_lbl.setWordWrap(True)
+        desc_lbl.setStyleSheet("color: #334155; font-size: 12px; line-height: 1.4;")
+        h_layout.addWidget(desc_lbl)
+
+        info_notice = QLabel(
+            "ℹ️ <i>Semantic preview based on PDF accessibility structure. Validate final reading behavior with a real screen reader.</i>"
+        )
+        info_notice.setWordWrap(True)
+        info_notice.setMinimumWidth(100)
+        info_notice.setStyleSheet("color: #64748b; font-size: 11px; border-top: 1px solid #dbeafe; padding-top: 4px;")
+        h_layout.addWidget(info_notice)
+
         layout.addWidget(header)
 
         # Transcript display
         self.text_browser = QTextBrowser()
+        self.text_browser.setOpenExternalLinks(True)
         self.text_browser.setStyleSheet("""
             QTextBrowser {
                 background-color: #ffffff;
                 border: 1px solid #cbd5e1;
                 border-radius: 8px;
                 padding: 16px;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
                 font-size: 13px;
                 line-height: 1.6;
             }
@@ -56,119 +93,45 @@ class ScreenReaderView(QWidget):
         layout.addWidget(self.text_browser)
 
     def load_document(self, doc: PDFDocumentModel):
-        """Generates the speech linearization transcript."""
-        if not doc.is_tagged or not doc.structure_tree:
-            self._render_untagged_preview(doc)
+        """Generates and renders the semantic reading sequence."""
+        self.current_doc = doc
+        self.last_result = self.engine.generate(doc)
+        self.text_browser.setHtml(self.last_result.html)
+
+    def _copy_text(self):
+        """Copies the plain text semantic stream to clipboard."""
+        if not self.last_result:
             return
-
-        html_parts = [
-            f"<div style='border-bottom: 2px solid #e2e8f0; padding-bottom: 12px; margin-bottom: 16px;'>"
-            f"<h2 style='margin:0; color:#1e293b;'>Screen Reader Speech Stream</h2>"
-            f"<p style='color:#64748b; font-size:12px; margin:4px 0 0 0;'>"
-            f"Document Title: <strong>{doc.title or 'Untitled'}</strong> | Language: <strong>{doc.language or 'Default'}</strong>"
-            f"</p></div>"
-        ]
-
-        # Traverse structure tree nodes in reading order
-        self._linearize_node(doc.structure_tree, html_parts)
-
-        self.text_browser.setHtml("".join(html_parts))
-
-    def _linearize_node(self, node: StructureNode, out_list: List[str]):
-        tag = node.standard_tag.upper()
-
-        if tag == "STRUCTTREEROOT":
-            for child in node.children:
-                self._linearize_node(child, out_list)
-            return
-
-        # Heading tags
-        if tag in ("H1", "H2", "H3", "H4", "H5", "H6"):
-            level = tag[1]
-            out_list.append(
-                f"<div style='margin: 12px 0 6px 0;'>"
-                f"<span style='background:#dbeafe; color:#1e40af; font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px;'>"
-                f"HEADING LEVEL {level}</span> "
-                f"<strong style='font-size: 15px; color:#0f172a;'>{node.title or node.actual_text or '[Heading Text]'}</strong>"
-                f"</div>"
-            )
-
-        # Figures / Graphics
-        elif tag in ("FIGURE", "FORMULA"):
-            alt_display = node.alt_text or node.actual_text
-            if alt_display:
-                out_list.append(
-                    f"<div style='background:#fef3c7; border-left:4px solid #f59e0b; padding:6px 10px; margin:8px 0; border-radius:4px;'>"
-                    f"<span style='color:#92400e; font-weight:700; font-size:11px;'>GRAPHIC:</span> "
-                    f"<span style='color:#78350f;'>\"{alt_display}\"</span>"
-                    f"</div>"
-                )
-            else:
-                out_list.append(
-                    f"<div style='background:#fee2e2; border-left:4px solid #ef4444; padding:6px 10px; margin:8px 0; border-radius:4px;'>"
-                    f"<span style='color:#991b1b; font-weight:700; font-size:11px;'>GRAPHIC (MISSING ALT TEXT):</span> "
-                    f"<span style='color:#b91c1c;'>[Unlabeled Image on Page {node.page or '?'}]</span>"
-                    f"</div>"
-                )
-
-        # Tables
-        elif tag == "TABLE":
-            summary = f" - \"{node.title}\"" if node.title else ""
-            out_list.append(
-                f"<div style='border:1px solid #cbd5e1; border-radius:6px; padding:10px; margin:12px 0; background:#f8fafc;'>"
-                f"<div style='font-weight:700; color:#047857; margin-bottom:6px;'>TABLE{summary}</div>"
-            )
-            for child in node.children:
-                self._linearize_node(child, out_list)
-            out_list.append("</div>")
-            return
-
-        # Links
-        elif tag == "LINK":
-            link_text = node.alt_text or node.actual_text or "[Hyperlink]"
-            out_list.append(
-                f"<span style='color:#2563eb; text-decoration:underline; font-weight:500;'>🔗 {link_text}</span> "
-            )
-
-        # Paragraphs & general blocks
-        elif tag == "P":
-            p_text = node.actual_text or node.title or ""
-            out_list.append(f"<p style='margin: 6px 0; color:#334155;'>{p_text}</p>")
-
-        # Lists
-        elif tag == "L":
-            out_list.append("<ul style='margin: 6px 0; padding-left: 20px;'>")
-            for child in node.children:
-                self._linearize_node(child, out_list)
-            out_list.append("</ul>")
-            return
-
-        elif tag == "LI":
-            out_list.append("<li style='margin: 3px 0;'>")
-            for child in node.children:
-                self._linearize_node(child, out_list)
-            out_list.append("</li>")
-            return
-
-        # Recurse children
-        for child in node.children:
-            self._linearize_node(child, out_list)
-
-    def _render_untagged_preview(self, doc: PDFDocumentModel):
-        html = (
-            "<div style='background:#fee2e2; border:1px solid #f87171; border-radius:8px; padding:16px; margin-bottom:16px;'>"
-            "<h3 style='color:#991b1b; margin-top:0;'>⚠️ Untagged Document Warning</h3>"
-            "<p style='color:#7f1d1d;'>"
-            "This PDF is not a Tagged PDF and does not possess a Logical Structure Tree (/StructTreeRoot). "
-            "Screen readers cannot determine headings, reading order, table grids, or alternative descriptions. "
-            "Assistive technology will fall back to raw geometric page text extraction."
-            "</p></div>"
+        clipboard = QApplication.clipboard()
+        clipboard.setText(self.last_result.plain_text)
+        QMessageBox.information(
+            self, "Copied",
+            "Semantic reading sequence copied to clipboard."
         )
-        for p in doc.pages[:5]:
-            html += (
-                f"<div style='border:1px solid #e2e8f0; border-radius:6px; padding:12px; margin-bottom:10px;'>"
-                f"<strong>--- Page {p.page_number} ---</strong><br/>"
-                f"<pre style='font-family:monospace; color:#475569;'>{p.text[:400] + ('...' if len(p.text)>400 else '')}</pre>"
-                f"</div>"
-            )
-        self.text_browser.setHtml(html)
+
+    def _export_transcript(self):
+        """Exports the semantic reading preview to a file."""
+        if not self.last_result:
+            return
+
+        filepath, selected_filter = QFileDialog.getSaveFileName(
+            self, "Export Semantic Reading Preview",
+            "semantic_reading_preview.html",
+            "HTML File (*.html);;Text File (*.txt)"
+        )
+        if not filepath:
+            return
+
+        try:
+            with open(filepath, "w", encoding="utf-8") as f:
+                if filepath.endswith(".txt"):
+                    f.write(self.last_result.plain_text)
+                else:
+                    f.write(self.last_result.html)
+            QMessageBox.information(self, "Export Successful", f"Preview saved to:\n{filepath}")
+        except Exception as e:
+            QMessageBox.critical(self, "Export Failed", f"Failed to save file:\n{e}")
+
+
+# Backward-compatible alias for existing imports and test references
+ScreenReaderView = SemanticReaderView

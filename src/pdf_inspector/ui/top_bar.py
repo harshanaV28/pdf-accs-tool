@@ -34,27 +34,31 @@ class TopBar(QWidget):
                 background-color: #ffffff;
                 border-bottom: 1px solid #e2e8f0;
             }
+            TopBar QPushButton {
+                padding: 5px 9px;
+                font-size: 12px;
+            }
         """)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 6, 14, 6)
-        layout.setSpacing(10)
+        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setSpacing(6)
 
         # Brand Title
         brand_layout = QHBoxLayout()
-        brand_layout.setSpacing(8)
+        brand_layout.setSpacing(6)
 
-        lbl_logo = QLabel("🔍")
-        lbl_logo.setStyleSheet("font-size: 20px;")
-        brand_layout.addWidget(lbl_logo)
+        self.lbl_logo = QLabel("🔍")
+        self.lbl_logo.setStyleSheet("font-size: 20px;")
+        brand_layout.addWidget(self.lbl_logo)
 
-        lbl_app = QLabel("PDF Accessibility Inspector")
-        lbl_app.setFont(QFont("Segoe UI", 12, QFont.Bold))
-        lbl_app.setStyleSheet("color: #0f172a;")
-        brand_layout.addWidget(lbl_app)
+        self.lbl_app = QLabel("PDF Accessibility Inspector")
+        self.lbl_app.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        self.lbl_app.setStyleSheet("color: #0f172a;")
+        brand_layout.addWidget(self.lbl_app)
 
         layout.addLayout(brand_layout)
-        layout.addSpacing(20)
+        layout.addSpacing(10)
 
         # Action Buttons
         self.btn_open = QPushButton("📂 Open PDF")
@@ -94,3 +98,10 @@ class TopBar(QWidget):
     def set_document_loaded(self, loaded: bool):
         self.btn_rescan.setEnabled(loaded)
         self.btn_export.setEnabled(loaded)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.width() < 960:
+            self.lbl_app.setText("PDF Inspector")
+        else:
+            self.lbl_app.setText("PDF Accessibility Inspector")

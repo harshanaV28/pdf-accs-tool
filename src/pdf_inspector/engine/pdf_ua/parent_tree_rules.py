@@ -44,7 +44,8 @@ class ParentTreeIntegrityRule(BaseRule):
             results.append(self.create_result(
                 status=CheckStatus.PASS,
                 message=f"/ParentTree number tree is present and valid with {doc.parent_tree_entries_count} mapped entries.",
-                evidence=f"ParentTree entries: {doc.parent_tree_entries_count}"
+                evidence=f"ParentTree entries: {doc.parent_tree_entries_count}",
+                items_count=0
             ))
 
         # Check page /StructParents
@@ -60,13 +61,15 @@ class ParentTreeIntegrityRule(BaseRule):
                 evidence=f"Pages missing /StructParents: {pages_missing_struct_parents}",
                 page=pages_missing_struct_parents[0],
                 custom_severity=Severity.HIGH,
-                custom_remediation="Ensure every page with marked content defines a /StructParents index pointing into the ParentTree."
+                custom_remediation="Ensure every page with marked content defines a /StructParents index pointing into the ParentTree.",
+                items_count=1
             ))
         else:
             results.append(self.create_result(
                 status=CheckStatus.PASS,
                 message="All pages with marked content possess valid /StructParents attributes.",
-                evidence="Page StructParents validated."
+                evidence="Page StructParents validated.",
+                items_count=0
             ))
 
         return results

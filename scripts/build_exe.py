@@ -19,12 +19,13 @@ def build():
     generate_icons(os.path.join(root_dir, "assets", "icons"))
 
     icon_ico = os.path.join(root_dir, "assets", "icons", "app_icon.ico")
-    main_script = os.path.join(root_dir, "src", "pdf_inspector", "app.py")
+    main_script = os.path.join(root_dir, "run.py")
 
     print("=== Step 2: Running PyInstaller ===")
     # Format data paths for PyInstaller (source;dest on Windows)
     theme_data = f"{os.path.join(root_dir, 'assets', 'styles', 'theme.qss')};assets/styles"
     icon_data = f"{os.path.join(root_dir, 'assets', 'icons', 'app_icon.png')};assets/icons"
+    src_path = os.path.join(root_dir, "src")
 
     pyinstaller_cmd = [
         sys.executable, "-m", "PyInstaller",
@@ -36,6 +37,8 @@ def build():
         "--icon", icon_ico,
         "--add-data", theme_data,
         "--add-data", icon_data,
+        "--paths", src_path,
+        "--paths", root_dir,
         "--hidden-import", "pymupdf",
         "--hidden-import", "fitz",
         "--hidden-import", "pikepdf",
@@ -49,22 +52,37 @@ def build():
         "--hidden-import", "PySide6.QtCore",
         "--hidden-import", "PySide6.QtGui",
         "--hidden-import", "PySide6.QtWidgets",
-        "--hidden-import", "src.pdf_inspector.engine.pdf_ua",
-        "--hidden-import", "src.pdf_inspector.engine.wcag",
-        "--hidden-import", "src.pdf_inspector.engine.quality",
-        "--hidden-import", "src.pdf_inspector.engine.ai_heuristics",
-        "--hidden-import", "src.pdf_inspector.reporting.pdf_report",
-        "--hidden-import", "src.pdf_inspector.reporting.html_report",
-        "--hidden-import", "src.pdf_inspector.reporting.json_exporter",
-        "--hidden-import", "src.pdf_inspector.ui.views.batch_view",
-        "--hidden-import", "src.pdf_inspector.ui.views.checkpoints_view",
-        "--hidden-import", "src.pdf_inspector.ui.views.detailed_results_view",
-        "--hidden-import", "src.pdf_inspector.ui.views.dashboard_view",
-        "--hidden-import", "src.pdf_inspector.ui.views.elements_view",
-        "--hidden-import", "src.pdf_inspector.ui.views.metadata_view",
-        "--hidden-import", "src.pdf_inspector.ui.views.screen_reader_view",
-        "--hidden-import", "src.pdf_inspector.ui.views.statistics_view",
-        "--hidden-import", "src.pdf_inspector.ui.views.tag_tree_view",
+        "--hidden-import", "pdf_inspector",
+        "--hidden-import", "pdf_inspector.app",
+        "--hidden-import", "pdf_inspector.core.models",
+        "--hidden-import", "pdf_inspector.core.document_parser",
+        "--hidden-import", "pdf_inspector.engine.runner",
+        "--hidden-import", "pdf_inspector.engine.pdf_ua",
+        "--hidden-import", "pdf_inspector.engine.wcag",
+        "--hidden-import", "pdf_inspector.engine.quality",
+        "--hidden-import", "pdf_inspector.engine.ai_heuristics",
+        "--hidden-import", "pdf_inspector.engine.semantic_reading",
+        "--hidden-import", "pdf_inspector.reporting.pdf_report",
+        "--hidden-import", "pdf_inspector.reporting.html_report",
+        "--hidden-import", "pdf_inspector.reporting.json_exporter",
+        "--hidden-import", "pdf_inspector.ui.main_window",
+        "--hidden-import", "pdf_inspector.ui.top_bar",
+        "--hidden-import", "pdf_inspector.ui.sidebar",
+        "--hidden-import", "pdf_inspector.ui.widgets.finding_details_panel",
+        "--hidden-import", "pdf_inspector.ui.widgets.pdf_canvas",
+        "--hidden-import", "pdf_inspector.ui.widgets.status_badge",
+        "--hidden-import", "pdf_inspector.ui.views.batch_view",
+        "--hidden-import", "pdf_inspector.ui.views.checkpoints_view",
+        "--hidden-import", "pdf_inspector.ui.views.detailed_results_view",
+        "--hidden-import", "pdf_inspector.ui.views.dashboard_view",
+        "--hidden-import", "pdf_inspector.ui.views.elements_view",
+        "--hidden-import", "pdf_inspector.ui.views.metadata_view",
+        "--hidden-import", "pdf_inspector.ui.views.screen_reader_view",
+        "--hidden-import", "pdf_inspector.ui.views.statistics_view",
+        "--hidden-import", "pdf_inspector.ui.views.tag_tree_view",
+        "--hidden-import", "pdf_inspector.ui.dialogs.about_dialog",
+        "--hidden-import", "pdf_inspector.ui.dialogs.settings_dialog",
+        "--hidden-import", "pdf_inspector.ui.dialogs.export_dialog",
         main_script
     ]
 

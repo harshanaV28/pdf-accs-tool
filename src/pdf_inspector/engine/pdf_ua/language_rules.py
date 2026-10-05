@@ -42,10 +42,19 @@ class DocumentLanguageRule(BaseRule):
                     custom_remediation="Use a standard IETF BCP 47 language code such as 'en', 'en-US', 'fr-CA', or 'de-DE'."
                 ))
             else:
+                total_text_units = 0
+                if hasattr(doc, "pages") and doc.pages:
+                    total_text_units = sum(len(p.text.split()) for p in doc.pages if p.text)
+                if total_text_units == 0 and doc.structure_tree:
+                    all_nodes = doc.structure_tree.find_all_nodes()
+                    total_text_units = sum(len(n.text_content.split()) for n in all_nodes if n.text_content)
+
+                items_cnt = max(1, total_text_units)
                 results.append(self.create_result(
                     status=CheckStatus.PASS,
                     message=f"Document primary natural language is specified as '{lang_code}'.",
-                    evidence=f"/Lang: '{lang_code}'"
+                    evidence=f"/Lang: '{lang_code}' (verified across {items_cnt} text element(s))",
+                    items_count=items_cnt
                 ))
 
         return results

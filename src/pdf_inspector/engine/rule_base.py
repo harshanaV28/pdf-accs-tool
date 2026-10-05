@@ -36,7 +36,8 @@ class BaseRule(ABC):
         custom_severity: Optional[Severity] = None,
         custom_remediation: Optional[str] = None,
         confidence: float = 1.0,
-        manual_review_required: bool = False
+        manual_review_required: bool = False,
+        items_count: int = 1
     ) -> CheckResult:
         """Convenience factory for creating a structured CheckResult."""
         return CheckResult(
@@ -55,5 +56,6 @@ class BaseRule(ABC):
             remediation=custom_remediation or self.remediation_template,
             confidence=confidence,
             machine_testable=self.machine_testable and not manual_review_required,
-            manual_review_required=manual_review_required or (status == CheckStatus.MANUAL_REVIEW)
+            manual_review_required=manual_review_required or (status == CheckStatus.MANUAL_REVIEW),
+            items_count=items_count
         )

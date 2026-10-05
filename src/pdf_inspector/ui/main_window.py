@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QFileDialog, QMessageBox, QProgressBar, QLabel, QSplitter,
     QStatusBar, QApplication, QInputDialog, QLineEdit
 )
-from PySide6.QtCore import Qt, QThread, Signal, QObject
+from PySide6.QtCore import Qt, QThread, Signal, QObject, QEvent
 from PySide6.QtGui import QDragEnterEvent, QDropEvent, QIcon
 
 from ..core.models import PDFDocumentModel, AuditReport, CheckResult
@@ -78,8 +78,21 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("PDF Accessibility Inspector")
-        self.resize(1280, 850)
         self.setAcceptDrops(True)
+        self.setMinimumSize(960, 580)
+
+        # Screen-aware default dimensions centered safely on the current display
+        screen = QApplication.primaryScreen()
+        if screen:
+            avail = screen.availableGeometry()
+            init_w = min(1200, max(960, int(avail.width() * 0.90)))
+            init_h = min(780, max(580, int(avail.height() * 0.90)))
+            self.resize(init_w, init_h)
+            pos_x = avail.x() + (avail.width() - init_w) // 2
+            pos_y = avail.y() + (avail.height() - init_h) // 2
+            self.move(max(avail.x(), pos_x), max(avail.y(), pos_y))
+        else:
+            self.resize(1100, 700)
 
         self.current_filepath: Optional[str] = None
         self.current_password: Optional[str] = None
@@ -112,11 +125,13 @@ class MainWindow(QMainWindow):
         # 2. Main Horizontal Splitter (Sidebar | Center Stack | Right Panel)
         self.main_splitter = QSplitter(Qt.Horizontal)
         self.main_splitter.setHandleWidth(1)
+        self.main_splitter.setChildrenCollapsible(False)
 
         # Left Sidebar
         self.sidebar = Sidebar()
         self.sidebar.page_selected.connect(self._on_navigation)
         self.main_splitter.addWidget(self.sidebar)
+        self.main_splitter.setCollapsible(0, False)
 
         # Center Stacked Widget
         self.center_stack = QStackedWidget()
@@ -135,7 +150,8 @@ class MainWindow(QMainWindow):
         self.checkpoints_view.request_pdf_report.connect(self.action_export_report)
         self.checkpoints_view.request_tag_tree.connect(lambda: self.sidebar.select_page("Tag Tree"))
         self.checkpoints_view.request_statistics.connect(lambda: self.sidebar.select_page("Statistics"))
-        self.checkpoints_view.request_preview.connect(lambda: self.sidebar.select_page("Screen Reader"))
+        self.checkpoints_view.request_preview.connect(lambda: self.sidebar.select_page("Semantic Reading Preview"))
+        self.checkpoints_view.category_clicked.connect(self._on_checkpoint_category_clicked)
         self.checkpoints_view.category_selected.connect(self._on_checkpoint_category_selected)
         self.center_stack.addWidget(self.checkpoints_view)  # 1
 
@@ -174,11 +190,14 @@ class MainWindow(QMainWindow):
         self.right_panel = FindingDetailsPanel()
         self.right_panel.highlight_requested.connect(self._on_highlight_requested)
         self.main_splitter.addWidget(self.right_panel)
+        self.main_splitter.setCollapsible(1, False)
+        self.main_splitter.setCollapsible(2, False)
 
-        # Set initial splitter stretch ratios
+        # Set initial splitter stretch ratios and explicit proportions
         self.main_splitter.setStretchFactor(0, 0)
         self.main_splitter.setStretchFactor(1, 1)
         self.main_splitter.setStretchFactor(2, 0)
+        self.main_splitter.setSizes([230, 680, 320])
 
         root_layout.addWidget(self.main_splitter)
 
@@ -200,6 +219,66 @@ class MainWindow(QMainWindow):
         if os.path.exists(theme_path):
             with open(theme_path, "r", encoding="utf-8") as f:
                 self.setStyleSheet(f.read())
+
+    def _ensure_onscreen_geometry(self):
+        """Guarantees window geometry stays fully visible and never placed off-screen."""
+        screen = self.screen() or QApplication.primaryScreen()
+        if not screen:
+            return
+        avail = screen.availableGeometry()
+        geo = self.geometry()
+
+        # If window exceeds available screen size, clamp it
+        new_w = min(geo.width(), avail.width())
+        new_h = min(geo.height(), avail.height())
+        if new_w != geo.width() or new_h != geo.height():
+            self.resize(new_w, new_h)
+            geo = self.geometry()
+
+        new_x = geo.x()
+        new_y = geo.y()
+
+        # If right or bottom edge overflows screen, shift inwards
+        if new_x + geo.width() > avail.right() + 1:
+            new_x = avail.right() + 1 - geo.width()
+        if new_y + geo.height() > avail.bottom() + 1:
+            new_y = avail.bottom() + 1 - geo.height()
+
+        # Left and top screen bounds take highest priority (never off-screen)
+        if new_x < avail.x():
+            new_x = avail.x()
+        if new_y < avail.y():
+            new_y = avail.y()
+
+        if new_x != geo.x() or new_y != geo.y():
+            self.move(new_x, new_y)
+
+    def _ensure_splitter_proportions(self):
+        """Guarantees the sidebar never collapses to 0 width on small or high-DPI screens."""
+        sizes = self.main_splitter.sizes()
+        if len(sizes) == 3:
+            total = sum(sizes)
+            if total > 0 and sizes[0] < 190:
+                sb_w = 230
+                rp_w = min(360, max(280, sizes[2])) if sizes[2] > 0 else 0
+                cs_w = max(400, total - sb_w - rp_w)
+                self.main_splitter.setSizes([sb_w, cs_w, rp_w])
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._ensure_splitter_proportions()
+        self._ensure_onscreen_geometry()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._ensure_splitter_proportions()
+
+    def changeEvent(self, event: QEvent):
+        super().changeEvent(event)
+        if event.type() == QEvent.WindowStateChange:
+            # When unmaximizing, restoring down, or restoring from taskbar
+            if not (self.windowState() & (Qt.WindowMaximized | Qt.WindowMinimized | Qt.WindowFullScreen)):
+                self._ensure_onscreen_geometry()
 
     # --- Drag & Drop ---
     def dragEnterEvent(self, event: QDragEnterEvent):
@@ -287,7 +366,7 @@ class MainWindow(QMainWindow):
 
         # Populate all views
         self.dashboard_view.load_document(doc, report)
-        self.checkpoints_view.update_report(report)
+        self.checkpoints_view.update_report(report, doc)
         self.detailed_view.set_findings(report.results)
         self.tag_tree_view.load_structure_tree(doc.structure_tree)
         self.screen_reader_view.load_document(doc)
@@ -297,6 +376,19 @@ class MainWindow(QMainWindow):
 
         # Switch to Checkpoints view to display PAC-style matrix
         self.sidebar.select_page("Checkpoints")
+
+        # Auto-populate right details panel with primary finding or first non-compliant category
+        pdfua_counts = report.get_category_counts("PDF/UA")
+        selected_cat = None
+        for cat in CheckpointsView.PDF_UA_CATEGORIES:
+            c_data = pdfua_counts.get(cat, {})
+            if c_data.get("failed", 0) > 0 or c_data.get("warned", 0) > 0:
+                selected_cat = cat
+                break
+        if not selected_cat and CheckpointsView.PDF_UA_CATEGORIES:
+            selected_cat = CheckpointsView.PDF_UA_CATEGORIES[0]
+        if selected_cat:
+            self._on_checkpoint_category_clicked("PDF/UA", selected_cat)
 
     def _on_audit_error(self, err_msg: str):
         self.progress_bar.setVisible(False)
@@ -329,6 +421,7 @@ class MainWindow(QMainWindow):
             "Detailed Findings": 2,
             "PDF Viewer": 3,
             "Tag Tree": 4,
+            "Semantic Reading Preview": 5,
             "Screen Reader": 5,
             "Document Metadata": 6,
             "Statistics": 7,
@@ -342,8 +435,21 @@ class MainWindow(QMainWindow):
         elif key in view_map:
             self.center_stack.setCurrentIndex(view_map[key])
 
+    def _on_checkpoint_category_clicked(self, standard: str, category: str):
+        """User single clicked a checkpoint category in Checkpoints view; preview in Right Panel."""
+        if not self.current_report:
+            return
+        cat_findings = [
+            r for r in self.current_report.results
+            if r.standard.upper() == standard.upper() and r.category.lower() == category.lower()
+        ]
+        counts = self.current_report.get_category_counts(standard).get(
+            category, {"passed": 0, "warned": 0, "failed": 0, "manual": 0}
+        )
+        self.right_panel.display_category_summary(standard, category, counts, cat_findings)
+
     def _on_checkpoint_category_selected(self, standard: str, category: str):
-        """User double clicked a checkpoint category in Checkpoints view."""
+        """User double clicked a checkpoint category in Checkpoints view; jump to Detailed Findings."""
         self.detailed_view.filter_by_category(standard, category)
         self.sidebar.select_page("Detailed Findings")
 

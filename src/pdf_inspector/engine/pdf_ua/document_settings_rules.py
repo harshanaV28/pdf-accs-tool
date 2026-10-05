@@ -43,10 +43,11 @@ class DisplayDocTitleRule(BaseRule):
 
         if non_structure_tabs and doc.is_tagged:
             results.append(self.create_result(
-                status=CheckStatus.WARNING,
+                status=CheckStatus.FAIL,
                 message=f"Tab order on page(s) {non_structure_tabs[:8]} is not explicitly set to Structure Order (/Tabs /S).",
                 evidence=f"Pages without /Tabs /S: {non_structure_tabs[:8]} (total: {len(non_structure_tabs)})",
                 page=non_structure_tabs[0],
+                custom_severity=Severity.HIGH,
                 custom_remediation="In Acrobat Pro Page Thumbnails panel, select all pages, open Page Properties, and set Tab Order to 'Use Document Structure'."
             ))
         else:
@@ -54,6 +55,22 @@ class DisplayDocTitleRule(BaseRule):
                 status=CheckStatus.PASS,
                 message="Page tab navigation conforms to document structure order.",
                 evidence="Tab order is set to Structure (/Tabs /S) across pages."
+            ))
+
+        # Check 3: MarkInfo Suspects (ISO 14289-1 Clause 7.18, Matterhorn Checkpoint 31-003)
+        if getattr(doc, "has_suspects", False):
+            results.append(self.create_result(
+                status=CheckStatus.FAIL,
+                message="The Suspects entry in the MarkInfo dictionary is set to true.",
+                evidence="MarkInfo /Suspects is true.",
+                custom_severity=Severity.HIGH,
+                custom_remediation="Resolve OCR suspects or remove /Suspects from the MarkInfo dictionary."
+            ))
+        else:
+            results.append(self.create_result(
+                status=CheckStatus.PASS,
+                message="Document MarkInfo dictionary has no OCR suspect flags.",
+                evidence="MarkInfo /Suspects is absent or false."
             ))
 
         return results

@@ -12,29 +12,32 @@ from .models import StructureNode
 
 logger = logging.getLogger(__name__)
 
-# Standard structure types defined in ISO 32000-1:2008, Clause 14.8.4
-STANDARD_STRUCTURE_TYPES: Set[str] = {
+# Standard structure types defined in ISO 32000-1:2008, Clause 14.8.4 (exact case-sensitive PDF names)
+STANDARD_STRUCTURE_TYPES_EXACT: Set[str] = {
     # Document level & Grouping
-    "DOCUMENT", "PART", "ART", "SECT", "DIV", "BLOCKQUOTE", "CAPTION",
-    "TOC", "TOCI", "INDEX", "NONSTRUCT", "PRIVATE",
+    "Document", "Part", "Art", "Sect", "Div", "BlockQuote", "Caption",
+    "TOC", "TOCI", "Index", "NonStruct", "Private",
     # Paragraph-like & Headings
     "P", "H", "H1", "H2", "H3", "H4", "H5", "H6",
     # Lists
-    "L", "LI", "LBL", "LBODY",
+    "L", "LI", "Lbl", "LBody",
     # Tables
-    "TABLE", "TR", "TH", "TD",
+    "Table", "TR", "TH", "TD",
     # Inline
-    "SPAN", "QUOTE", "NOTE", "REFERENCE", "BIBENTRY", "CODE", "LINK", "ANNOT",
+    "Span", "Quote", "Note", "Reference", "BibEntry", "Code", "Link", "Annot",
     # Illustration & Forms
-    "FIGURE", "FORMULA", "FORM",
+    "Figure", "Formula", "Form",
     # Ruby & Warichu
-    "RUBY", "RB", "RT", "RP", "WARICHU", "WT", "WP"
+    "Ruby", "RB", "RT", "RP", "Warichu", "WT", "WP"
 }
+
+STANDARD_STRUCTURE_TYPES: Set[str] = {s.upper() for s in STANDARD_STRUCTURE_TYPES_EXACT}
 
 
 def resolve_role(tag: str, role_map: Dict[str, str]) -> Tuple[str, bool, bool]:
     """
-    Resolves a structure type to its standard role via /RoleMap.
+    Resolves a structure type to its standard role via /RoleMap according to ISO 32000-1.
+    Standard PDF structure types are case-sensitive.
     Returns: (standard_role, is_mapped, is_circular)
     """
     clean_tag = tag.strip("/ ")
@@ -42,7 +45,8 @@ def resolve_role(tag: str, role_map: Dict[str, str]) -> Tuple[str, bool, bool]:
     visited = set()
 
     while True:
-        if curr.upper() in STANDARD_STRUCTURE_TYPES:
+        # Check exact case match first
+        if curr in STANDARD_STRUCTURE_TYPES_EXACT:
             return curr, curr != clean_tag, False
 
         visited.add(curr)
@@ -105,6 +109,12 @@ class StructureTreeParser:
         self.parent_tree_entries: Dict[int, Any] = {}
         self.has_parent_tree: bool = False
         self.parent_tree_valid: bool = False
+        self._role_cache: Dict[str, Tuple[str, bool, bool]] = {}
+
+    def _resolve_role_cached(self, tag: str) -> Tuple[str, bool, bool]:
+        if tag not in self._role_cache:
+            self._role_cache[tag] = resolve_role(tag, self.role_map)
+        return self._role_cache[tag]
 
     def parse(self) -> Optional[StructureNode]:
         """Parses the root StructTreeRoot and /ParentTree if present."""
@@ -134,6 +144,12 @@ class StructureTreeParser:
             if "/K" in root_obj:
                 k_val = root_obj["/K"]
                 self._parse_k(k_val, root_node)
+
+            # Compute root pages spanned
+            root_spanned = set()
+            for c in root_node.children:
+                root_spanned.update(c.pages_spanned)
+            root_node.pages_spanned = sorted(list(root_spanned))
 
             return root_node
         except Exception as e:
@@ -173,12 +189,16 @@ class StructureTreeParser:
             node_id = f"node_{self.node_counter}"
 
             raw_tag = str(item.get("/S", "Span")).strip("/ ")
-            standard_tag, _, _ = resolve_role(raw_tag, self.role_map)
+            standard_tag, _, _ = self._resolve_role_cached(raw_tag)
 
-            title = str(item.get("/T")) if "/T" in item else None
-            alt_text = str(item.get("/Alt")) if "/Alt" in item else None
-            actual_text = str(item.get("/ActualText")) if "/ActualText" in item else None
-            lang = str(item.get("/Lang")) if "/Lang" in item else None
+            title = str(item.get("/T")).replace("\x00", "").strip() if "/T" in item else None
+            alt_raw = item.get("/Alt")
+            alt_text = str(alt_raw).replace("\x00", "") if alt_raw is not None else None
+            actual_raw = item.get("/ActualText")
+            actual_text = str(actual_raw).replace("\x00", "") if actual_raw is not None else None
+            exp_raw = item.get("/E")
+            expanded_text = str(exp_raw).replace("\x00", "").strip() if exp_raw is not None else None
+            lang = str(item.get("/Lang")).replace("\x00", "").strip() if "/Lang" in item else None
 
             page_num = None
             if "/Pg" in item:
@@ -197,6 +217,17 @@ class StructureTreeParser:
                             for k, v in a_elem.items():
                                 attrs[f"{str(k).strip('/')}_{idx}"] = str(v)
 
+            has_pg = "/Pg" in item
+            pg_val = page_num if has_pg else None
+
+            is_artifact = (
+                elem_type == "/Artifact"
+                or raw_tag.lower() == "artifact"
+                or standard_tag.lower() == "artifact"
+                or attrs.get("O") == "/Artifact"
+                or attrs.get("Type") == "/Pagination"
+            )
+
             child_node = StructureNode(
                 id=node_id,
                 tag=raw_tag,
@@ -204,10 +235,14 @@ class StructureTreeParser:
                 title=title,
                 alt_text=alt_text,
                 actual_text=actual_text,
+                expanded_text=expanded_text,
+                is_artifact=is_artifact,
                 lang=lang,
                 page=page_num or parent_node.page,
                 attributes=attrs,
-                obj_num=getattr(item, "objgen", (None, None))[0] if hasattr(item, "objgen") else None
+                obj_num=getattr(item, "objgen", (None, None))[0] if hasattr(item, "objgen") else None,
+                has_pg_attr=has_pg,
+                pg_attr_val=pg_val
             )
 
             # Traverse /K of this element
@@ -216,6 +251,23 @@ class StructureTreeParser:
 
             # Attach actual page text and bounding box from MCID data
             self._link_mcid_data(child_node)
+
+            # If figure/formula, distinguish extracted graphic text from alt text
+            if standard_tag.upper() in ("FIGURE", "FORMULA"):
+                if child_node.text_content and child_node.text_content.strip():
+                    child_node.extracted_graphic_text = child_node.text_content.strip().replace("\x00", "")
+
+            # Detect character decoding anomalies (unmapped glyphs / PUA without ActualText)
+            sample_text = (actual_text or "") + (child_node.text_content or "")
+            if "\ufffd" in sample_text or (any("\ue000" <= c <= "\uf8ff" for c in (child_node.text_content or "")) and not actual_text):
+                child_node.has_decoding_error = True
+                child_node.decoding_error_msg = "Contains unmapped glyphs, replacement characters (), or undecodable font encoding."
+
+            # Fast bottom-up post-order collection of pages spanned (O(1) per node)
+            spanned = set([child_node.page] if child_node.page else [])
+            for c in child_node.children:
+                spanned.update(c.pages_spanned)
+            child_node.pages_spanned = sorted(list(spanned))
 
             parent_node.children.append(child_node)
 
@@ -258,11 +310,13 @@ class StructureTreeParser:
     def _resolve_page_number(self, pg_obj: Any) -> Optional[int]:
         """Resolves a pikepdf page dictionary or indirect object to a 1-based page number."""
         try:
-            if hasattr(pg_obj, "objgen"):
-                return self.page_map.get(pg_obj.objgen)
-            for page_idx, page in enumerate(self.pdf.pages, start=1):
-                if page.objgen == getattr(pg_obj, "objgen", None):
-                    return page_idx
+            if hasattr(pg_obj, "objgen") and pg_obj.objgen in self.page_map:
+                return self.page_map[pg_obj.objgen]
+            if hasattr(pg_obj, "objgen") and pg_obj.objgen[0] in self.page_map:
+                return self.page_map[pg_obj.objgen[0]]
+            # Also try direct object ref id
+            if id(pg_obj) in self.page_map:
+                return self.page_map[id(pg_obj)]
         except Exception:
             pass
         return None

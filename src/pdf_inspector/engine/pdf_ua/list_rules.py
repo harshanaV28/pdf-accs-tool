@@ -11,7 +11,7 @@ from ...core.models import PDFDocumentModel, CheckResult, CheckStatus, Severity
 class ListStructureHierarchyRule(BaseRule):
     rule_id = "PDFUA-LIST-001"
     name = "List Structure Hierarchy"
-    category = "Structure Elements"
+    category = "Structure elements"
     standard = "PDF/UA"
     severity = Severity.HIGH
     description = "A list (<L>) must contain only list items (<LI>), and each <LI> must contain only list label (<Lbl>) and/or list body (<LBody>) elements."
@@ -23,7 +23,8 @@ class ListStructureHierarchyRule(BaseRule):
             return [self.create_result(
                 status=CheckStatus.PASS,
                 message="No lists detected in document (or document contains no list structures).",
-                evidence="List count: 0"
+                evidence="List count: 0",
+                items_count=0
             )]
 
         invalid_lists = [l for l in doc.lists if not l.is_valid_structure]

@@ -1,0 +1,81 @@
+=== REPORT/SF_Chapter 16 202-269_PAC_UA_Report.pdf ===
+Pages: 1
+
+--- PAGE 1 ---
+Date/Time
+Standard
+2026-10-01 10:57
+PDF/UA-1
+CHECKPOINT
+PASSED
+WARNED
+FAILED
+Basic Requirements
+PDF Syntax
+2094
+-
+-
+Fonts
+85
+-
+-
+Content
+139253
+-
+-
+Embedded Files
+-
+-
+-
+Natural language
+62781
+-
+-
+Logical structure
+Structure elements
+147
+-
+1
+Structure tree
+1883
+72
+-
+Role mapping
+1955
+-
+-
+Alternative Descriptions
+-
+-
+1024
+Metadata and Settings
+Metadata
+2
+-
+1
+Document settings
+3
+-
+-
+RESULT
+Title
+Problem 16.145
+Filename
+SF_Chapter 16 202-269.pdf
+Language
+Tags
+Pages
+Size
+en
+1955
+68
+5 MB
+DOCUMENT
+PAC Test Report
+Version: 26.1.0.0
+OS: Windows
+ABOUT PAC
+This PDF file is not PDF/UA compliant.
+PDF Accessibility Checker (PAC) evaluates the accessibility of PDF ﬁles, for machine checkable criteria, according to 
+ISO 14289-1 (PDF/UA) by using the Matterhorn Protocol.
+PAC is a free tool developed by axes4. Copyright © 2024 axes4 GmbH.

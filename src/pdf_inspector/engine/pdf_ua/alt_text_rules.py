@@ -86,7 +86,7 @@ class FigureAlternativeTextRule(BaseRule):
                     custom_remediation="Replace file names or generic placeholders with meaningful descriptive alt text."
                 ))
 
-        if untagged_images and not missing_alt:
+        if untagged_images:
             for img in untagged_images[:5]:
                 results.append(self.create_result(
                     status=CheckStatus.FAIL,
@@ -95,14 +95,26 @@ class FigureAlternativeTextRule(BaseRule):
                     page=img.page,
                     bounding_box=img.bbox,
                     object_reference=f"Image {img.id}",
+                    custom_severity=Severity.HIGH,
                     custom_remediation="Tag the image as a <Figure> with alt text, or mark it as an Artifact if purely decorative."
                 ))
 
         if not missing_alt and not placeholder_alt and not untagged_images:
+            passed_cnt = len(all_graphics) if all_graphics else len(doc.images)
             results.append(self.create_result(
                 status=CheckStatus.PASS,
-                message=f"All {len(all_graphics)} figure/formula element(s) have valid alternative descriptions.",
-                evidence="All graphical elements contain non-empty descriptive text."
+                message=f"All {passed_cnt} figure/formula element(s) have valid alternative descriptions.",
+                evidence="All graphical elements contain non-empty descriptive text.",
+                items_count=passed_cnt
             ))
+        elif not missing_alt and not untagged_images and placeholder_alt:
+            passed_cnt = max(0, len(all_graphics) - len(placeholder_alt))
+            if passed_cnt > 0:
+                results.append(self.create_result(
+                    status=CheckStatus.PASS,
+                    message=f"{passed_cnt} figure/formula element(s) have valid alternative descriptions.",
+                    evidence=f"Passed figures: {passed_cnt}/{len(all_graphics)}",
+                    items_count=passed_cnt
+                ))
 
         return results

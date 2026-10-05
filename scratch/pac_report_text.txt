@@ -1,0 +1,78 @@
+--- PAGE 1 ---
+Date/Time
+Standard
+2026-10-01 14:35
+PDF/UA-1
+CHECKPOINT
+PASSED
+WARNED
+FAILED
+Basic Requirements
+PDF Syntax
+1665
+-
+-
+Fonts
+23
+-
+-
+Content
+20927
+-
+16
+Embedded Files
+-
+-
+-
+Natural language
+9418
+-
+-
+Logical structure
+Structure elements
+58
+38
+8
+Structure tree
+1560
+3
+14
+Role mapping
+1580
+-
+12
+Alternative Descriptions
+32
+-
+2
+Metadata and Settings
+Metadata
+3
+-
+-
+Document settings
+3
+-
+-
+RESULT
+Title
+Key English Test for Schools Sample Test 
+Filename
+Impact_2e_AmE_L1_Assessment_SampleTest_…tudent.pdf
+Language
+Tags
+Pages
+Size
+en
+1589
+25
+1 MB
+DOCUMENT
+PAC Test Report
+Version: 26.1.0.0
+OS: Windows
+ABOUT PAC
+This PDF file is not PDF/UA compliant.
+PDF Accessibility Checker (PAC) evaluates the accessibility of PDF ﬁles, for machine checkable criteria, according to 
+ISO 14289-1 (PDF/UA) by using the Matterhorn Protocol.
+PAC is a free tool developed by axes4. Copyright © 2024 axes4 GmbH.

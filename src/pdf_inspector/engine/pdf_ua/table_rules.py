@@ -11,7 +11,7 @@ from ...core.models import PDFDocumentModel, CheckResult, CheckStatus, Severity
 class TableStructureHeadersRule(BaseRule):
     rule_id = "PDFUA-TABLE-001"
     name = "Table Headers & Structure"
-    category = "Structure Elements"
+    category = "Structure elements"
     standard = "PDF/UA"
     severity = Severity.HIGH
     description = "Data tables must include header cells (<TH>) and maintain strict parent-child relationships (Table > TR > TH/TD)."
@@ -23,7 +23,8 @@ class TableStructureHeadersRule(BaseRule):
             return [self.create_result(
                 status=CheckStatus.PASS,
                 message="No tables detected in document.",
-                evidence="Table count: 0"
+                evidence="Table count: 0",
+                items_count=0
             )]
 
         tables_without_th = [t for t in doc.tables if not t.has_headers]

@@ -23,7 +23,7 @@ class Sidebar(QWidget):
         ("Detailed Findings", "📋 Detailed Results"),
         ("PDF Viewer", "🔍 Integrated PDF Viewer"),
         ("Tag Tree", "🌳 Logical Tag Tree"),
-        ("Screen Reader", "🔊 Screen Reader Preview"),
+        ("Semantic Reading Preview", "📖 Semantic Reading Preview"),
         ("Document Metadata", "ℹ️ Document & Metadata"),
         ("Statistics", "📊 Statistics & Health"),
         ("Fonts", "🔤 Font Assets"),
@@ -40,7 +40,8 @@ class Sidebar(QWidget):
         self._init_ui()
 
     def _init_ui(self):
-        self.setFixedWidth(230)
+        self.setMinimumWidth(200)
+        self.setMaximumWidth(260)
         self.setStyleSheet("""
             Sidebar {
                 background-color: #ffffff;
@@ -77,8 +78,9 @@ class Sidebar(QWidget):
 
     def select_page(self, key_name: str):
         """Programmatically selects a navigation item."""
+        target = "Semantic Reading Preview" if key_name == "Screen Reader" else key_name
         for row in range(self.list_widget.count()):
             item = self.list_widget.item(row)
-            if item and item.data(Qt.UserRole) == key_name:
+            if item and item.data(Qt.UserRole) in (target, key_name):
                 self.list_widget.setCurrentRow(row)
                 break

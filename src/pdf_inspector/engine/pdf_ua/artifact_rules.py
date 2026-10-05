@@ -44,3 +44,75 @@ class ArtifactInStructureTreeRule(BaseRule):
             ))
 
         return results
+
+
+class ArtifactInsideTaggedContentRule(BaseRule):
+    rule_id = "PDFUA-ART-003"
+    name = "Artifacts inside tagged content"
+    category = "Content"
+    standard = "PDF/UA"
+    severity = Severity.HIGH
+    description = "Content marked as an artifact must not be present inside tagged content (ISO 14289-1:2013 Clause 7.1, Matterhorn Checkpoint 01-003)."
+    remediation_template = "Move the artifact outside of tagged content sequences in the page content stream or remove the enclosing structural tags in Acrobat Pro."
+
+    def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
+        results = []
+        artifacts = doc.all_artifacts
+        if not artifacts:
+            results.append(self.create_result(
+                status=CheckStatus.PASS,
+                message="No content marked as Artifact is present inside tagged content.",
+                evidence="Artifacts inside tagged content count: 0",
+                items_count=1
+            ))
+            return results
+
+        invalid_artifacts = [a for a in artifacts if a.is_inside_tagged]
+        valid_artifacts = [a for a in artifacts if not a.is_inside_tagged]
+
+        if invalid_artifacts:
+            for art in invalid_artifacts:
+                obj_ref_parts = []
+                if art.parent_tag:
+                    if art.parent_mcid is not None:
+                        obj_ref_parts.append(f"<{art.parent_tag} MCID={art.parent_mcid}>")
+                    else:
+                        obj_ref_parts.append(f"<{art.parent_tag}>")
+                if art.xobject_name:
+                    obj_ref_parts.append(f"/{art.xobject_name}")
+                else:
+                    obj_ref_parts.append("/Artifact")
+                obj_ref = " -> ".join(obj_ref_parts)
+
+                evidence = f"Artifact present inside tagged content <{art.parent_tag or 'TaggedContent'}> on page {art.page_number}."
+                if art.text_snippet:
+                    evidence += f" Content: \"{art.text_snippet[:100]}\""
+
+                results.append(self.create_result(
+                    status=CheckStatus.FAIL,
+                    message="Artifact present inside tagged content.",
+                    evidence=evidence,
+                    page=art.page_number,
+                    bounding_box=art.bbox,
+                    object_reference=obj_ref,
+                    custom_severity=Severity.HIGH,
+                    custom_remediation=self.remediation_template,
+                    items_count=1
+                ))
+
+            if valid_artifacts:
+                results.append(self.create_result(
+                    status=CheckStatus.PASS,
+                    message=f"{len(valid_artifacts)} artifact(s) correctly placed outside tagged content.",
+                    evidence=f"Artifact content validation passed: {len(valid_artifacts)}/{len(artifacts)}",
+                    items_count=len(valid_artifacts)
+                ))
+        else:
+            results.append(self.create_result(
+                status=CheckStatus.PASS,
+                message=f"All {len(valid_artifacts)} artifact(s) are correctly placed outside tagged content.",
+                evidence=f"Artifact content validation passed: {len(valid_artifacts)}/{len(artifacts)}",
+                items_count=len(valid_artifacts) if valid_artifacts else 1
+            ))
+
+        return results

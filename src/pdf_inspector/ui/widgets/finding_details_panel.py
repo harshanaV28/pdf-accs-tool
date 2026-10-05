@@ -4,7 +4,7 @@ Right sidebar panel showing exhaustive details for the currently selected CheckR
 including technical evidence, standard citations, and actionable remediation steps.
 """
 
-from typing import Optional
+from typing import Optional, Dict, List, Any
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextBrowser,
     QPushButton, QGroupBox, QScrollArea, QFrame
@@ -25,7 +25,7 @@ class FindingDetailsPanel(QWidget):
         self._init_ui()
 
     def _init_ui(self):
-        self.setMinimumWidth(320)
+        self.setMinimumWidth(280)
         self.setMaximumWidth(450)
 
         main_layout = QVBoxLayout(self)
@@ -126,10 +126,61 @@ class FindingDetailsPanel(QWidget):
         scroll.setWidget(content_widget)
         main_layout.addWidget(scroll)
 
+    def display_category_summary(self, standard: str, category: str, counts: Dict[str, int], findings: List[CheckResult]):
+        """Displays category-level summary and highlights primary failure or warning if present."""
+        p = counts.get("passed", 0)
+        w = counts.get("warned", 0)
+        f = counts.get("failed", 0)
+
+        # If there are active findings (failures or warnings), display the most critical finding directly
+        active_findings = [res for res in findings if res.status in (CheckStatus.FAIL, CheckStatus.ERROR, CheckStatus.WARNING)]
+        if active_findings:
+            # Sort with FAIL first, then WARNING
+            active_findings.sort(key=lambda x: 0 if x.status in (CheckStatus.FAIL, CheckStatus.ERROR) else 1)
+            primary = active_findings[0]
+            self.display_finding(primary)
+            self.title_label.setText(f"{category} ({len(active_findings)} issue{'s' if len(active_findings) > 1 else ''})")
+            return
+
+        # If fully passed or no failures
+        self.current_finding = None
+        self.title_label.setText(f"Checkpoint: {category}")
+        self.name_label.setText(f"{category}")
+        if f > 0:
+            self.status_badge.setStatus(CheckStatus.FAIL)
+            self.severity_badge.setSeverity(Severity.HIGH)
+        elif w > 0:
+            self.status_badge.setStatus(CheckStatus.WARNING)
+            self.severity_badge.setSeverity(Severity.MEDIUM)
+        else:
+            self.status_badge.setStatus(CheckStatus.PASS)
+            self.severity_badge.setSeverity(Severity.INFO)
+
+        self.id_label.setText(f"Checkpoint: {category}")
+        self.standard_label.setText(f"Standard: {standard}")
+        self.page_label.setText(f"Passed: {p} | Warned: {w} | Failed: {f}")
+        self.object_label.setText(f"Total Evaluated: {p + w + f}")
+
+        if f == 0 and w == 0:
+            self.txt_explanation.setPlainText(
+                f"All checks for '{category}' passed successfully according to {standard} requirements."
+            )
+            self.txt_evidence.setPlainText(f"Compliance confirmed: {p} item(s) passed.")
+            self.txt_remediation.setPlainText("No remediation necessary. This checkpoint conforms to accessibility requirements.")
+        else:
+            self.txt_explanation.setPlainText(
+                f"Evaluation of '{category}' identified {f} failure(s) and {w} warning(s)."
+            )
+            self.txt_evidence.setPlainText(f"Passed: {p}, Warned: {w}, Failed: {f}")
+            self.txt_remediation.setPlainText("Double-click this row or navigate to 'Detailed Results' to inspect individual findings and page highlights.")
+
+        self.btn_highlight.setEnabled(False)
+
     def display_finding(self, finding: Optional[CheckResult]):
         """Populates panel with the selected finding's properties."""
         self.current_finding = finding
         if not finding:
+            self.title_label.setText("Finding Details")
             self.name_label.setText("No finding selected")
             self.id_label.setText("Rule ID: -")
             self.standard_label.setText("Standard: -")
@@ -141,6 +192,7 @@ class FindingDetailsPanel(QWidget):
             self.btn_highlight.setEnabled(False)
             return
 
+        self.title_label.setText("Finding Details")
         self.name_label.setText(f"{finding.name}")
         self.status_badge.setStatus(finding.status)
         self.severity_badge.setSeverity(finding.severity)

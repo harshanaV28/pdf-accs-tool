@@ -42,7 +42,8 @@ class UnicodePUARule(BaseRule):
             results.append(self.create_result(
                 status=CheckStatus.PASS,
                 message="No unannounced Unicode Private Use Area (PUA) glyphs detected.",
-                evidence="PUA character check passed."
+                evidence="PUA character check passed.",
+                items_count=0
             ))
 
         return results
@@ -72,13 +73,15 @@ class ReplacementCharacterRule(BaseRule):
                 evidence=f"Pages with U+FFFD: {r_pages}",
                 page=r_pages[0],
                 custom_severity=Severity.HIGH,
-                custom_remediation="Fix font encoding or re-embed the font with a complete ToUnicode table."
+                custom_remediation="Fix font encoding or re-embed the font with a complete ToUnicode table.",
+                items_count=len(r_pages)
             ))
         else:
             results.append(self.create_result(
                 status=CheckStatus.PASS,
                 message="No replacement characters (U+FFFD) detected in extracted text.",
-                evidence="Glyph mapping integrity verified."
+                evidence="Glyph mapping integrity verified.",
+                items_count=0
             ))
 
         return results

@@ -123,6 +123,31 @@ class WCAGAdaptableRule(BaseRule):
                     evidence=f"Heading tags count: {len(headings)}"
                 ))
 
+            # Check Lists (SC 1.3.1)
+            all_nodes = [n for n in doc.structure_tree.find_all_nodes() if n.tag != "StructTreeRoot"]
+            list_items = [n for n in all_nodes if n.standard_tag.upper() == "LI"]
+            invalid_lis = []
+            for li in list_items:
+                invalid_children = [c for c in li.children if c.standard_tag.upper() not in ("LBL", "LBODY")]
+                if invalid_children:
+                    invalid_lis.append((li, invalid_children))
+            if invalid_lis:
+                for li, inv in invalid_lis[:3]:
+                    results.append(self.create_result(
+                        status=CheckStatus.FAIL,
+                        message=f"List item on page {li.page or 1} has invalid structure (SC 1.3.1). Found <{inv[0].tag}> inside <LI>.",
+                        evidence=f"LI on page {li.page} contains {[c.tag for c in inv]}; list items must only contain <Lbl> and/or <LBody>.",
+                        page=li.page or 1,
+                        object_reference=f"<LI> on page {li.page or 1}",
+                        custom_remediation="Structure list items with <Lbl> for bullet/number and <LBody> for list content."
+                    ))
+            elif list_items:
+                results.append(self.create_result(
+                    status=CheckStatus.PASS,
+                    message=f"All {len(list_items)} list item(s) conform to SC 1.3.1 list structure requirements.",
+                    evidence="List items properly structured with <Lbl> and <LBody>."
+                ))
+
         return results
 
 
@@ -136,13 +161,26 @@ class WCAGDistinguishableRule(BaseRule):
     remediation_template = "Verify visual contrast of text against background meets 4.5:1 for regular text and 3:1 for large text."
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
+        results = []
+        # Check font embedding (PDF16 / SC 1.4)
+        unembedded = [f for f in doc.fonts if not f.is_embedded and f.is_used]
+        if unembedded:
+            results.append(self.create_result(
+                status=CheckStatus.FAIL,
+                message=f"{len(unembedded)} font(s) are not embedded, risking inaccurate text presentation (WCAG 1.4 / PDF16).",
+                evidence=f"Unembedded font(s): {', '.join(f.name for f in unembedded[:3])}",
+                page=unembedded[0].pages[0] if unembedded[0].pages else 1,
+                custom_remediation="Embed all fonts in the document."
+            ))
+
         # Contrast requires manual visual review or sampling
-        return [self.create_result(
+        results.append(self.create_result(
             status=CheckStatus.MANUAL_REVIEW,
             message="Verify color contrast (minimum 4.5:1 for normal text, 3:1 for large text) and ensure color is not the only means of conveying information.",
             evidence="Color contrast requires visual sampling or human verification.",
             manual_review_required=True
-        )]
+        ))
+        return results
 
 
 class WCAGKeyboardAccessibleRule(BaseRule):

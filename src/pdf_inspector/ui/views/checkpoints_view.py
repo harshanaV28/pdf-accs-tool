@@ -1,24 +1,29 @@
 """
 Checkpoints View
-Renders the primary tabbed inspection matrix matching the user reference screenshots:
-Tabs for [PDF/UA], [WCAG], [Quality], [AI], columns for [Checkpoint], [Passed], [Warned], [Failed],
-and bottom navigation toolbar buttons.
+Renders the primary tabbed inspection matrix matching the PAC reference screenshots:
+- Document summary card with cover thumbnail, Title, Filename, Language, Pages, Tags, Size
+- Tabs for [PDF/UA], [WCAG], [Quality], [AI] with status icons
+- Clear compliance status banner ("This PDF file is not PDF/UA compliant.")
+- Matrix columns: [Checkpoint], [Passed], [Warned], [Failed]
+- Bottom navigation toolbar: Results in detail, PDF report, Tag Tree, Statistics, Preview.
 """
 
 from typing import Optional, Dict, List, Any
+import pymupdf
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QTableWidget,
-    QTableWidgetItem, QHeaderView, QPushButton, QLabel, QFrame
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QTabWidget, QTableWidget,
+    QTableWidgetItem, QHeaderView, QPushButton, QLabel, QFrame, QScrollArea
 )
 from PySide6.QtCore import Signal, Qt
-from PySide6.QtGui import QIcon, QColor, QFont
-from ...core.models import AuditReport, CheckStatus
+from PySide6.QtGui import QIcon, QColor, QFont, QPixmap, QImage
+from ...core.models import AuditReport, PDFDocumentModel, CheckStatus
 
 
 class CheckpointTableWidget(QTableWidget):
     """Custom table displaying checkpoint categories with counts and status icons."""
 
-    category_selected = Signal(str, str)  # (standard, category_name)
+    category_selected = Signal(str, str)  # (standard, category_name) - on double click
+    category_clicked = Signal(str, str)   # (standard, category_name) - on single click
 
     def __init__(self, categories: List[str], standard_name: str, parent=None):
         super().__init__(parent)
@@ -37,38 +42,39 @@ class CheckpointTableWidget(QTableWidget):
         self.setAlternatingRowColors(True)
 
         header = self.horizontalHeader()
+        header.setMinimumSectionSize(50)
         header.setSectionResizeMode(0, QHeaderView.Stretch)
         header.setSectionResizeMode(1, QHeaderView.Fixed)
         header.setSectionResizeMode(2, QHeaderView.Fixed)
         header.setSectionResizeMode(3, QHeaderView.Fixed)
-        self.setColumnWidth(1, 100)
-        self.setColumnWidth(2, 100)
-        self.setColumnWidth(3, 100)
+        self.setColumnWidth(1, 68)
+        self.setColumnWidth(2, 68)
+        self.setColumnWidth(3, 68)
 
         self.setRowCount(len(self.categories))
         for row, cat in enumerate(self.categories):
-            # Checkpoint name item
-            item_name = QTableWidgetItem(f"🚫  {cat}")
+            item_name = QTableWidgetItem(f"⊘  {cat}")
             item_name.setFont(QFont("Segoe UI", 10))
+            item_name.setToolTip(cat)
             self.setItem(row, 0, item_name)
 
-            # Passed, Warned, Failed counters initialized empty
             for col in range(1, 4):
                 item_cnt = QTableWidgetItem("-")
                 item_cnt.setTextAlignment(Qt.AlignCenter)
                 self.setItem(row, col, item_cnt)
 
+        self.cellClicked.connect(self._on_row_click)
         self.cellDoubleClicked.connect(self._on_row_double_click)
 
     def update_counts(self, counts_by_cat: Dict[str, Dict[str, int]]):
-        """Updates the row numbers and status icons based on actual audit results."""
+        """Updates row numbers and status icons matching PAC."""
         for row, cat in enumerate(self.categories):
             c_data = counts_by_cat.get(cat, {"passed": 0, "warned": 0, "failed": 0, "manual": 0})
             p = c_data["passed"]
             w = c_data["warned"]
             f = c_data["failed"]
 
-            # Choose icon
+            # Choose icon matching PAC 2026
             if f > 0:
                 icon_str = "❌"
             elif w > 0:
@@ -76,35 +82,50 @@ class CheckpointTableWidget(QTableWidget):
             elif p > 0:
                 icon_str = "✅"
             else:
-                icon_str = "⚪"
+                icon_str = "⊘"
 
             item_name = self.item(row, 0)
             if item_name:
                 item_name.setText(f"{icon_str}  {cat}")
+                item_name.setToolTip(f"{cat}: {p} passed, {w} warned, {f} failed")
 
             # Passed column
             item_p = self.item(row, 1)
             if item_p:
-                item_p.setText(str(p) if p > 0 else "0")
+                item_p.setText(str(p) if p > 0 else "-")
                 if p > 0:
                     item_p.setForeground(QColor("#166534"))
                     item_p.setFont(QFont("Segoe UI", 10, QFont.Bold))
+                else:
+                    item_p.setForeground(QColor("#6b7280"))
+                    item_p.setFont(QFont("Segoe UI", 10))
 
             # Warned column
             item_w = self.item(row, 2)
             if item_w:
-                item_w.setText(str(w) if w > 0 else "0")
+                item_w.setText(str(w) if w > 0 else "-")
                 if w > 0:
                     item_w.setForeground(QColor("#b45309"))
                     item_w.setFont(QFont("Segoe UI", 10, QFont.Bold))
+                else:
+                    item_w.setForeground(QColor("#6b7280"))
+                    item_w.setFont(QFont("Segoe UI", 10))
 
             # Failed column
             item_f = self.item(row, 3)
             if item_f:
-                item_f.setText(str(f) if f > 0 else "0")
+                item_f.setText(str(f) if f > 0 else "-")
                 if f > 0:
                     item_f.setForeground(QColor("#dc2626"))
                     item_f.setFont(QFont("Segoe UI", 10, QFont.Bold))
+                else:
+                    item_f.setForeground(QColor("#6b7280"))
+                    item_f.setFont(QFont("Segoe UI", 10))
+
+    def _on_row_click(self, row: int, col: int):
+        if 0 <= row < len(self.categories):
+            cat_name = self.categories[row]
+            self.category_clicked.emit(self.standard_name, cat_name)
 
     def _on_row_double_click(self, row: int, col: int):
         if 0 <= row < len(self.categories):
@@ -113,7 +134,7 @@ class CheckpointTableWidget(QTableWidget):
 
 
 class CheckpointsView(QWidget):
-    """Container view providing the tabbed Checkpoints interface and bottom action toolbar."""
+    """Container view providing the PAC inspection interface, header summary, and bottom action toolbar."""
 
     request_rescan = Signal()
     request_detailed_results = Signal()
@@ -121,7 +142,8 @@ class CheckpointsView(QWidget):
     request_tag_tree = Signal()
     request_statistics = Signal()
     request_preview = Signal()
-    category_selected = Signal(str, str)  # (standard, category)
+    category_selected = Signal(str, str)  # (standard, category) - on double click
+    category_clicked = Signal(str, str)   # (standard, category) - on single click
 
     PDF_UA_CATEGORIES = [
         "PDF Syntax (ISO 32000-1)",
@@ -129,7 +151,7 @@ class CheckpointsView(QWidget):
         "Content",
         "Embedded Files",
         "Natural language",
-        "Structure Elements",
+        "Structure elements",
         "Structure tree",
         "Role mapping",
         "Alternative Descriptions",
@@ -174,33 +196,137 @@ class CheckpointsView(QWidget):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # 1. Top row containing Tabs and Rescan button
-        tabs_header_layout = QHBoxLayout()
-        tabs_header_layout.setContentsMargins(6, 6, 6, 0)
+        # 1. Document Header Card matching PAC screenshot
+        self.header_card = QFrame()
+        self.header_card.setStyleSheet("""
+            QFrame {
+                background-color: #ffffff;
+                border-bottom: 1px solid #e2e8f0;
+            }
+        """)
+        h_layout = QHBoxLayout(self.header_card)
+        h_layout.setContentsMargins(16, 12, 16, 12)
+        h_layout.setSpacing(20)
 
+        # Cover Thumbnail
+        self.lbl_thumb = QLabel()
+        self.lbl_thumb.setFixedSize(84, 110)
+        self.lbl_thumb.setAlignment(Qt.AlignCenter)
+        self.lbl_thumb.setStyleSheet("background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px;")
+        h_layout.addWidget(self.lbl_thumb)
+
+        # Metadata Grid
+        meta_grid = QGridLayout()
+        meta_grid.setHorizontalSpacing(16)
+        meta_grid.setVerticalSpacing(4)
+
+        lbl_t_title = QLabel("Title")
+        lbl_t_title.setStyleSheet("color: #64748b; font-size: 12px;")
+        self.lbl_val_title = QLabel("-")
+        self.lbl_val_title.setStyleSheet("color: #1e3a8a; font-weight: bold; font-size: 13px; background-color: #dbeafe; padding: 2px 6px; border-radius: 3px;")
+
+        lbl_t_fn = QLabel("Filename")
+        lbl_t_fn.setStyleSheet("color: #64748b; font-size: 12px;")
+        self.lbl_val_fn = QLabel("-")
+        self.lbl_val_fn.setStyleSheet("color: #0f172a; font-weight: bold; font-size: 13px;")
+
+        lbl_t_lang = QLabel("Language")
+        lbl_t_lang.setStyleSheet("color: #64748b; font-size: 12px;")
+        self.lbl_val_lang = QLabel("-")
+        self.lbl_val_lang.setStyleSheet("color: #0f172a; font-size: 13px;")
+
+        lbl_t_pages = QLabel("Pages")
+        lbl_t_pages.setStyleSheet("color: #64748b; font-size: 12px;")
+        self.lbl_val_pages = QLabel("-")
+        self.lbl_val_pages.setStyleSheet("color: #0f172a; font-weight: bold; font-size: 13px;")
+
+        lbl_t_tags = QLabel("Tags")
+        lbl_t_tags.setStyleSheet("color: #64748b; font-size: 12px;")
+        self.lbl_val_tags = QLabel("-")
+        self.lbl_val_tags.setStyleSheet("color: #0f172a; font-weight: bold; font-size: 13px;")
+
+        lbl_t_size = QLabel("Size")
+        lbl_t_size.setStyleSheet("color: #64748b; font-size: 12px;")
+        self.lbl_val_size = QLabel("-")
+        self.lbl_val_size.setStyleSheet("color: #0f172a; font-size: 13px;")
+
+        meta_grid.addWidget(lbl_t_title, 0, 0)
+        meta_grid.addWidget(self.lbl_val_title, 0, 1)
+        meta_grid.addWidget(lbl_t_fn, 1, 0)
+        meta_grid.addWidget(self.lbl_val_fn, 1, 1)
+        meta_grid.addWidget(lbl_t_lang, 2, 0)
+        meta_grid.addWidget(self.lbl_val_lang, 2, 1)
+        meta_grid.addWidget(lbl_t_pages, 3, 0)
+        meta_grid.addWidget(self.lbl_val_pages, 3, 1)
+        meta_grid.addWidget(lbl_t_tags, 4, 0)
+        meta_grid.addWidget(self.lbl_val_tags, 4, 1)
+        meta_grid.addWidget(lbl_t_size, 5, 0)
+        meta_grid.addWidget(self.lbl_val_size, 5, 1)
+
+        h_layout.addLayout(meta_grid)
+        h_layout.addStretch()
+        main_layout.addWidget(self.header_card)
+
+        # 2. Tabbed Checkpoints Section
         self.tab_widget = QTabWidget()
 
-        # PDF/UA Table
+        # PDF/UA Page
+        p_pdfua = QWidget()
+        l_pdfua = QVBoxLayout(p_pdfua)
+        l_pdfua.setContentsMargins(10, 8, 10, 0)
+        l_pdfua.setSpacing(6)
+        self.lbl_pdfua_banner = QLabel("This PDF file is not PDF/UA compliant.")
+        self.lbl_pdfua_banner.setStyleSheet("font-size: 13px; font-weight: bold; color: #1e293b; padding: 4px 2px;")
+        l_pdfua.addWidget(self.lbl_pdfua_banner)
         self.table_pdf_ua = CheckpointTableWidget(self.PDF_UA_CATEGORIES, "PDF/UA")
+        self.table_pdf_ua.category_clicked.connect(self.category_clicked)
         self.table_pdf_ua.category_selected.connect(self.category_selected)
-        self.tab_widget.addTab(self.table_pdf_ua, "PDF/UA")
+        l_pdfua.addWidget(self.table_pdf_ua)
+        self.tab_widget.addTab(p_pdfua, "PDF/UA")
 
-        # WCAG Table
+        # WCAG Page
+        p_wcag = QWidget()
+        l_wcag = QVBoxLayout(p_wcag)
+        l_wcag.setContentsMargins(10, 8, 10, 0)
+        l_wcag.setSpacing(6)
+        self.lbl_wcag_banner = QLabel("WCAG 2.1/2.2 AA Accessibility Evaluation")
+        self.lbl_wcag_banner.setStyleSheet("font-size: 13px; font-weight: bold; color: #1e293b; padding: 4px 2px;")
+        l_wcag.addWidget(self.lbl_wcag_banner)
         self.table_wcag = CheckpointTableWidget(self.WCAG_CATEGORIES, "WCAG")
+        self.table_wcag.category_clicked.connect(self.category_clicked)
         self.table_wcag.category_selected.connect(self.category_selected)
-        self.tab_widget.addTab(self.table_wcag, "WCAG")
+        l_wcag.addWidget(self.table_wcag)
+        self.tab_widget.addTab(p_wcag, "WCAG")
 
-        # Quality Table
+        # Quality Page
+        p_quality = QWidget()
+        l_quality = QVBoxLayout(p_quality)
+        l_quality.setContentsMargins(10, 8, 10, 0)
+        l_quality.setSpacing(6)
+        self.lbl_quality_banner = QLabel("Document Quality & Readability Evaluation")
+        self.lbl_quality_banner.setStyleSheet("font-size: 13px; font-weight: bold; color: #1e293b; padding: 4px 2px;")
+        l_quality.addWidget(self.lbl_quality_banner)
         self.table_quality = CheckpointTableWidget(self.QUALITY_CATEGORIES, "Quality")
+        self.table_quality.category_clicked.connect(self.category_clicked)
         self.table_quality.category_selected.connect(self.category_selected)
-        self.tab_widget.addTab(self.table_quality, "Quality")
+        l_quality.addWidget(self.table_quality)
+        self.tab_widget.addTab(p_quality, "Quality")
 
-        # AI Table
+        # AI Page
+        p_ai = QWidget()
+        l_ai = QVBoxLayout(p_ai)
+        l_ai.setContentsMargins(10, 8, 10, 0)
+        l_ai.setSpacing(6)
+        self.lbl_ai_banner = QLabel("AI Assisted Remediation & Heuristic Audit")
+        self.lbl_ai_banner.setStyleSheet("font-size: 13px; font-weight: bold; color: #1e293b; padding: 4px 2px;")
+        l_ai.addWidget(self.lbl_ai_banner)
         self.table_ai = CheckpointTableWidget(self.AI_CATEGORIES, "AI")
+        self.table_ai.category_clicked.connect(self.category_clicked)
         self.table_ai.category_selected.connect(self.category_selected)
-        self.tab_widget.addTab(self.table_ai, "AI")
+        l_ai.addWidget(self.table_ai)
+        self.tab_widget.addTab(p_ai, "AI")
 
-        # Corner reload button matching screenshot
+        # Refresh button in top right
         self.btn_refresh = QPushButton("🔄")
         self.btn_refresh.setToolTip("Rescan Document")
         self.btn_refresh.setFixedSize(32, 28)
@@ -210,7 +336,7 @@ class CheckpointsView(QWidget):
 
         main_layout.addWidget(self.tab_widget)
 
-        # 2. Bottom Toolbar matching the screenshot layout
+        # 3. Bottom Toolbar matching PAC layout
         bottom_bar = QFrame()
         bottom_bar.setStyleSheet("background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 6px;")
         bottom_layout = QHBoxLayout(bottom_bar)
@@ -227,7 +353,6 @@ class CheckpointsView(QWidget):
 
         bottom_layout.addStretch()
 
-        # Icon buttons: Tree, Stats, Preview
         self.btn_tree = QPushButton("🌳 Tag Tree")
         self.btn_tree.clicked.connect(self.request_tag_tree)
         bottom_layout.addWidget(self.btn_tree)
@@ -242,9 +367,68 @@ class CheckpointsView(QWidget):
 
         main_layout.addWidget(bottom_bar)
 
-    def update_report(self, report: AuditReport):
-        """Updates all tables with report counts."""
-        self.table_pdf_ua.update_counts(report.get_category_counts("PDF/UA"))
-        self.table_wcag.update_counts(report.get_category_counts("WCAG"))
-        self.table_quality.update_counts(report.get_category_counts("Quality"))
-        self.table_ai.update_counts(report.get_category_counts("AI"))
+    def update_report(self, report: AuditReport, doc: Optional[PDFDocumentModel] = None):
+        """Updates all tables, status banners, tab icons, and document metadata summary."""
+        pdfua_counts = report.get_category_counts("PDF/UA")
+        wcag_counts = report.get_category_counts("WCAG")
+        quality_counts = report.get_category_counts("Quality")
+        ai_counts = report.get_category_counts("AI")
+
+        self.table_pdf_ua.update_counts(pdfua_counts)
+        self.table_wcag.update_counts(wcag_counts)
+        self.table_quality.update_counts(quality_counts)
+        self.table_ai.update_counts(ai_counts)
+
+        # Tab status indicators matching PAC
+        def _get_status_icon(counts):
+            failed = sum(c.get("failed", 0) for c in counts.values())
+            warned = sum(c.get("warned", 0) for c in counts.values())
+            if failed > 0:
+                return "❌"
+            elif warned > 0:
+                return "⚠️"
+            return "✅"
+
+        self.tab_widget.setTabText(0, f"{_get_status_icon(pdfua_counts)} PDF/UA")
+        self.tab_widget.setTabText(1, f"{_get_status_icon(wcag_counts)} WCAG")
+        self.tab_widget.setTabText(2, f"{_get_status_icon(quality_counts)} Quality")
+        self.tab_widget.setTabText(3, "AI")
+
+        # Compliance Banner
+        pdfua_failed = sum(c["failed"] for c in pdfua_counts.values())
+        if pdfua_failed > 0:
+            self.lbl_pdfua_banner.setText("This PDF file is not PDF/UA compliant.")
+            self.lbl_pdfua_banner.setStyleSheet("font-size: 13px; font-weight: bold; color: #1e293b; padding: 4px 2px;")
+        else:
+            self.lbl_pdfua_banner.setText("This PDF file is PDF/UA compliant.")
+            self.lbl_pdfua_banner.setStyleSheet("font-size: 13px; font-weight: bold; color: #15803d; padding: 4px 2px;")
+
+        # Update metadata card if doc model provided
+        if doc is not None:
+            self.lbl_val_title.setText(doc.title if doc.title else doc.filename)
+            self.lbl_val_fn.setText(doc.filename)
+            self.lbl_val_lang.setText(doc.language if doc.language else "-")
+            self.lbl_val_pages.setText(str(doc.page_count))
+
+            tag_count = len([n for n in doc.structure_tree.find_all_nodes() if n.tag != "StructTreeRoot"]) if doc.structure_tree else 0
+            self.lbl_val_tags.setText(str(tag_count))
+
+            if doc.filesize >= 1024 * 1024:
+                size_str = f"{doc.filesize / (1024 * 1024):.0f} MB"
+            elif doc.filesize > 0:
+                size_str = f"{doc.filesize / 1024:.0f} KB"
+            else:
+                size_str = "-"
+            self.lbl_val_size.setText(size_str)
+
+            # Render page 1 thumbnail
+            try:
+                fitz_doc = pymupdf.open(doc.filepath)
+                if len(fitz_doc) > 0:
+                    pix = fitz_doc[0].get_pixmap(dpi=72)
+                    qimg = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format_RGB888)
+                    pixmap = QPixmap.fromImage(qimg).scaled(84, 110, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    self.lbl_thumb.setPixmap(pixmap)
+                fitz_doc.close()
+            except Exception:
+                self.lbl_thumb.setText("📄")

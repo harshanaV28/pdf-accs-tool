@@ -51,6 +51,7 @@ class CheckResult:
     confidence: float = 1.0
     machine_testable: bool = True
     manual_review_required: bool = False
+    items_count: int = 1
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -70,6 +71,7 @@ class CheckResult:
             "confidence": self.confidence,
             "machine_testable": self.machine_testable,
             "manual_review_required": self.manual_review_required,
+            "items_count": self.items_count,
         }
 
 
@@ -90,6 +92,50 @@ class StructureNode:
     text_content: str = ""
     bbox: Optional[Tuple[float, float, float, float]] = None
     obj_num: Optional[int] = None
+    has_pg_attr: bool = False
+    pg_attr_val: Optional[int] = None
+    pages_spanned: List[int] = field(default_factory=list)
+    is_artifact: bool = False
+    extracted_graphic_text: Optional[str] = None
+    ai_description: Optional[str] = None
+    expanded_text: Optional[str] = None
+    has_decoding_error: bool = False
+    decoding_error_msg: str = ""
+
+    def get_readable_text(self, recursive: bool = True) -> str:
+        """
+        Returns human-readable text for this node.
+        Prefers author-specified /ActualText, then direct text_content,
+        then recursively aggregates text from child elements while preserving
+        meaningful Unicode characters.
+        """
+        if self.actual_text and self.actual_text.strip().replace("\x00", ""):
+            return self.actual_text.strip().replace("\x00", "")
+
+        parts: List[str] = []
+        if self.text_content and self.text_content.strip().replace("\x00", ""):
+            parts.append(self.text_content.strip().replace("\x00", ""))
+
+        if recursive and self.children:
+            for child in self.children:
+                # Do not aggregate text from independent major structures into a parent block
+                if child.standard_tag.upper() not in ("FIGURE", "FORMULA", "TABLE", "NOTE"):
+                    c_txt = child.get_readable_text(recursive=True)
+                    if c_txt and c_txt not in parts:
+                        parts.append(c_txt)
+
+        return " ".join(parts).strip()
+
+    def is_decorative(self) -> bool:
+        """Returns True if this node represents a decorative/artifact element."""
+        return (
+            self.is_artifact
+            or self.standard_tag.upper() == "ARTIFACT"
+            or self.tag.lower() == "artifact"
+            or self.attributes.get("O") == "/Artifact"
+            or self.attributes.get("Type") == "/Pagination"
+            or self.attributes.get("Placement") == "/Background"
+        )
 
     def find_all_by_standard_tag(self, target_tag: str) -> List['StructureNode']:
         results = []
@@ -117,6 +163,8 @@ class FontModel:
     encoding: str
     pages: List[int] = field(default_factory=list)
     is_used: bool = True
+    xref: int = 0
+    has_standard_encoding: bool = False
 
 
 @dataclass
@@ -209,6 +257,19 @@ class ListModel:
 
 
 @dataclass
+class ArtifactOccurrenceModel:
+    """Represents a marked-content /Artifact sequence found in page streams or XObjects."""
+    page_number: int
+    is_inside_tagged: bool
+    parent_tag: Optional[str] = None
+    parent_mcid: Optional[int] = None
+    xobject_name: Optional[str] = None
+    xobject_xref: Optional[int] = None
+    bbox: Optional[Tuple[float, float, float, float]] = None
+    text_snippet: str = ""
+
+
+@dataclass
 class PageModel:
     """Represents metadata and geometry for a single PDF page."""
     page_number: int  # 1-indexed
@@ -225,6 +286,7 @@ class PageModel:
     mcids: List[int] = field(default_factory=list)
     mcid_bboxes: Dict[int, Tuple[float, float, float, float]] = field(default_factory=dict)
     mcid_texts: Dict[int, str] = field(default_factory=dict)
+    artifacts: List[ArtifactOccurrenceModel] = field(default_factory=list)
 
 
 @dataclass
@@ -248,6 +310,7 @@ class PDFDocumentModel:
     is_encrypted: bool = False
     allows_extraction: bool = True
     display_doc_title: bool = False
+    has_suspects: bool = False
     xmp_metadata_present: bool = False
     pdfua_identifier_present: bool = False
     pdfua_part: Optional[int] = None
@@ -266,6 +329,15 @@ class PDFDocumentModel:
     annotations: List[AnnotationModel] = field(default_factory=list)
     bookmarks: List[BookmarkModel] = field(default_factory=list)
     raw_metadata: Dict[str, Any] = field(default_factory=dict)
+    embedded_files_count: int = 0
+
+    @property
+    def all_artifacts(self) -> List[ArtifactOccurrenceModel]:
+        """Returns all artifact occurrences across all pages."""
+        arts: List[ArtifactOccurrenceModel] = []
+        for p in self.pages:
+            arts.extend(p.artifacts)
+        return arts
 
 
 @dataclass
@@ -284,14 +356,15 @@ class AuditReport:
         for r in self.get_results_by_standard(standard):
             if r.category not in counts:
                 counts[r.category] = {"passed": 0, "warned": 0, "failed": 0, "manual": 0}
+            cnt = r.items_count if (hasattr(r, "items_count") and r.items_count is not None) else 1
             if r.status == CheckStatus.PASS:
-                counts[r.category]["passed"] += 1
+                counts[r.category]["passed"] += cnt
             elif r.status == CheckStatus.WARNING:
-                counts[r.category]["warned"] += 1
+                counts[r.category]["warned"] += cnt
             elif r.status in (CheckStatus.FAIL, CheckStatus.ERROR):
-                counts[r.category]["failed"] += 1
+                counts[r.category]["failed"] += cnt
             elif r.status == CheckStatus.MANUAL_REVIEW:
-                counts[r.category]["manual"] += 1
+                counts[r.category]["manual"] += cnt
         return counts
 
     @property

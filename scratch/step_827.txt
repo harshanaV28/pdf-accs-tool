@@ -1,0 +1,168 @@
+# Phase 1 Investigation Report: Artifact Present Inside Tagged Content (Matterhorn 01-003)
+
+**Role**: Senior Python PDF Engineer, PDF/UA Accessibility Specialist, and QA Engineer  
+**Target Document**: `Work_Documentation_Administrative_Fillable_1_accessible.pdf` (72 pages)  
+**Reference Tool**: axes4 PAC (PDF Accessibility Checker)  
+**Standard**: ISO 14289-1:2013 (PDF/UA-1) Clause 7.1, ISO 32000-1:2008 Clause 14.8.2.2, Matterhorn Protocol 1.02 Checkpoint 01-003
+
+---
+
+## 1. Executive Summary & Root Cause Analysis
+
+### The Discrepancy
+- **axes4 PAC**: Reports **41 Errors** under **Checkpoint: Content** &rarr; **Subcategory: Artifacts inside tagged content** &rarr; Finding: *"Artifact present inside tagged content"*. PAC highlights the vertical copyright notice on **Page 27** with a bounding box around `"© 2024 McGraw Hill LLC. All rights reserved. No reproduction or distribution without the prior written consent of McGraw Hill LLC."`
+- **PAI (Our Tool)**: Reported `Content: Passed 4, Failed 0` (completely missing the 41 errors).
+
+### Standards & Specification Background
+- **ISO 14289-1:2013 (PDF/UA-1), Clause 7.1**:
+  > *"Content shall be marked as Artifact or tagged as content, but shall not be both."*
+- **ISO 32000-1:2008, Clause 14.8.2.2**:
+  > *"Marked-content sequences that represent artifacts shall not be included, either directly or indirectly, in the structure tree. An artifact marked-content sequence shall not be contained within a marked-content sequence that is part of the logical structure."*
+- **Matterhorn Protocol 1.02, Checkpoint 01-003 (Machine-testable)**:
+  > *"Content marked as Artifact is present inside tagged content."*
+
+### What Actually Exists in the PDF Content Streams
+We performed low-level binary and token-level stream parsing on `Work_Documentation_Administrative_Fillable_1_accessible.pdf`:
+1. On **13 pages** (Pages 27, 29, 31, 33, 57, 59, 61, 63, 64, 65, 67, 69, 71), the page content stream opens a tagged structural element sequence:
+   ```pdf
+   /Figure <</MCID 2 >> BDC      % <-- Marked content part of logical structure
+   q
+   0 Tc 0 0 0 1 k
+   1 w 10 M 
+   /T1_3 1 Tf
+   /Fm2 Do                       % <-- Invokes Form XObject Fm2 inside tagged content
+   Q
+   ...
+   EMC                           % <-- Ends Figure tag
+   ```
+2. When inspecting the Form XObject stream for `/Fm2` (object `xref 1392`):
+   ```pdf
+   0 TL
+   q
+   BT
+   /Artifact <</O /Layout >> BDC 
+   ... [(\037\036\035...)] TJ     % "© 2024 McGraw Hill LLC. All rights reserved."
+   EMC 
+   /Artifact <</O /Layout >> BDC 
+   (\036) Tj                     % separator
+   EMC 
+   /Artifact <</O /Layout >> BDC 
+   ... [(\006...)] TJ            % "No reproduction or distribution without..."
+   EMC 
+   ET
+   Q
+   ```
+   **`Fm2` contains 3 distinct `/Artifact` marked-content sequences.**
+3. Because `/Fm2 Do` is invoked while the content-stream marked-content stack is inside `/Figure <</MCID 2>> BDC`, all 3 `/Artifact` sequences are structurally nested inside a tagged content container.
+4. Calculating across the entire document:
+   - **Pages 27, 29, 31, 33, 57, 59, 61, 63, 67, 69, 71** (11 pages): Each invokes `Fm2` (3 artifact sequences each) inside `<Figure>` &rarr; **33 errors**
+   - **Page 64**: Invokes `Fm3` (xref 320, 1 artifact sequence) inside `<Figure>` &rarr; **1 error**
+   - **Page 65**: Invokes `Fm1` (xref 326, 3 artifact sequences), `Fm2` (xref 327, 1 artifact sequence), and `Fm3` (xref 1392, 3 artifact sequences) inside `<Figure>` &rarr; **7 errors**
+   - **Total**: $33 + 1 + 7 = \mathbf{41\text{ errors}}$!
+5. On Page 27, the placement rect of `Fm2` is `(92.30, 170.18, 106.36, 379.87)` in page space, which matches the visual highlight rectangle shown in PAC's screenshot.
+
+---
+
+## 2. Why PAI Did Not Detect This
+
+1. **Missing Content Stream Marked-Content Stack Tracking**:
+   - In [`document_parser.py`](file:///c:/Users/HBS/Desktop/pdf%20checking%20tool/src/pdf_inspector/core/document_parser.py#L214-L245), stream parsing was limited to matching `/MCID \d+` for text block bounding box heuristic mapping, and collecting XObject names inside `/Artifact` blocks only for excluding them from the images count.
+   - The parser did not track marked-content nesting (`BDC`/`BMC` push, `EMC` pop) to know whether `/Artifact` or a Form XObject containing `/Artifact` was invoked inside an active `/MCID` tag.
+2. **Missing Checkpoint 01-003 Rule**:
+   - In [`artifact_rules.py`](file:///c:/Users/HBS/Desktop/pdf%20checking%20tool/src/pdf_inspector/engine/pdf_ua/artifact_rules.py#L11-L46), only `ArtifactInStructureTreeRule` (`PDFUA-ARTIFACT-001`) existed, which only inspects `doc.structure_tree` for nodes whose tag name is literally `"ARTIFACT"`.
+   - There was **no rule** evaluating whether `/Artifact` sequences appear inside tagged content sequences either directly in page content streams or within Form XObjects invoked inside tagged content.
+3. **No Intermediate Data Model for Content-Stream Artifact Occurrences**:
+   - [`PageModel`](file:///c:/Users/HBS/Desktop/pdf%20checking%20tool/src/pdf_inspector/core/models.py#L260-L277) lacked fields to store artifact stream nesting records and valid artifact counts, preventing rules from reporting page numbers, XObject xrefs, parent MCIDs, and bounding boxes for page highlighting.
+
+---
+
+## 3. Relevant Files and Architecture
+
+| File | Current Role | Required Changes |
+| :--- | :--- | :--- |
+| [`src/pdf_inspector/core/models.py`](file:///c:/Users/HBS/Desktop/pdf%20checking%20tool/src/pdf_inspector/core/models.py) | Defines `PageModel`, `PDFDocumentModel`, and `CheckResult` | Add data structure for content stream artifact occurrences: `ArtifactOccurrenceModel(page, is_inside_tagged, parent_tag, parent_mcid, xobject_name, xobject_xref, bbox, text_snippet)` |
+| [`src/pdf_inspector/core/document_parser.py`](file:///c:/Users/HBS/Desktop/pdf%20checking%20tool/src/pdf_inspector/core/document_parser.py) | Parses PDF streams into `PDFDocumentModel` | Implement marked-content stack parser in page streams + Form XObjects to detect artifacts inside tagged content and capture bounding boxes |
+| [`src/pdf_inspector/engine/pdf_ua/artifact_rules.py`](file:///c:/Users/HBS/Desktop/pdf%20checking%20tool/src/pdf_inspector/engine/pdf_ua/artifact_rules.py) | Contains `ArtifactInStructureTreeRule` | Implement `ArtifactInsideTaggedContentRule` (`PDFUA-ART-003`) conforming to ISO 14289-1 Clause 7.1 and Matterhorn 01-003 |
+| [`src/pdf_inspector/engine/pdf_ua/__init__.py`](file:///c:/Users/HBS/Desktop/pdf%20checking%20tool/src/pdf_inspector/engine/pdf_ua/__init__.py) | Registers PDF/UA rules | Register `ArtifactInsideTaggedContentRule` |
+| [`src/pdf_inspector/ui/views/checkpoints_view.py`](file:///c:/Users/HBS/Desktop/pdf%20checking%20tool/src/pdf_inspector/ui/views/checkpoints_view.py) | Renders PAC Matrix | Ensure Content checkpoint displays passed and failed counts properly |
+| [`tests/test_pac_parity.py`](file:///c:/Users/HBS/Desktop/pdf%20checking%20tool/tests/test_pac_parity.py) | PAC comparison regression tests | Add test cases verifying exact 41 errors on `Work_Documentation_Administrative_Fillable_1_accessible.pdf`, 0 errors on `58-78 (2).pdf`, and synthetic stream tests |
+
+---
+
+## 4. Proposed Implementation Plan
+
+### Step 1: Intermediate PDF Model Enhancement (`models.py`)
+Add an `@dataclass` `ArtifactOccurrenceModel`:
+```python
+@dataclass
+class ArtifactOccurrenceModel:
+    page_number: int
+    is_inside_tagged: bool
+    parent_tag: Optional[str] = None
+    parent_mcid: Optional[int] = None
+    xobject_name: Optional[str] = None
+    xobject_xref: Optional[int] = None
+    bbox: Optional[Tuple[float, float, float, float]] = None
+    text_snippet: str = ""
+```
+Attach `artifacts: List[ArtifactOccurrenceModel]` to `PageModel` and an aggregated helper on `PDFDocumentModel`.
+
+### Step 2: Content Stream Marked-Content Analyzer (`document_parser.py`)
+Enhance `DocumentParser` to parse content streams and maintain a marked-content stack:
+1. When encountering `/Tag << ... >> BDC`:
+   - If `/MCID n` is present, push `{'tag': Tag, 'mcid': n, 'is_tagged': True}` onto the stack.
+   - If `Tag == "Artifact"`, check if `any(s['is_tagged'] for s in stack)`. If true, record an invalid nested artifact occurrence; if false, record a valid artifact.
+2. When encountering `/Artifact BMC`:
+   - Check if `any(s['is_tagged'] for s in stack)` to record an invalid nested artifact occurrence or valid artifact.
+3. When encountering `EMC`:
+   - Pop the stack.
+4. When encountering `/Name Do` (Form XObject invocation):
+   - Check if the stack currently has an active tagged ancestor (`in_tagged = True`).
+   - If so, look up the Form XObject's content stream. Scan for `/Artifact ... BDC/BMC` sequences.
+   - For each artifact sequence inside the Form XObject, record an invalid nested artifact occurrence with:
+     - `page_number = page_idx`
+     - `parent_tag = tagged_ancestor['tag']`
+     - `parent_mcid = tagged_ancestor['mcid']`
+     - `xobject_name = Name`
+     - `xobject_xref = xref`
+     - `bbox = xo_rect` (the real page placement rect of the XObject)
+     - `text_snippet = extracted_text` (e.g. copyright notice)
+
+### Step 3: Standards-Based Rule Implementation (`artifact_rules.py`)
+Implement `ArtifactInsideTaggedContentRule`:
+- **Rule ID**: `PDFUA-ART-003`
+- **Name**: `Artifacts inside tagged content`
+- **Category**: `Content`
+- **Standard**: `PDF/UA`
+- **Severity**: `Severity.HIGH`
+- **Standard Reference**: `ISO 14289-1:2013, Clause 7.1 & Matterhorn Checkpoint 01-003`
+- **Evaluation Logic**:
+  - Iterate through all artifact occurrences across the document.
+  - For each artifact inside tagged content:
+    - Return a finding with `status=CheckStatus.FAIL`, `page=occ.page_number`, `bounding_box=occ.bbox`, `object_reference=f"<{occ.parent_tag} MCID={occ.parent_mcid}> -> /{occ.xobject_name}"`, and clear remediation instructions.
+    - Group or report individual findings up to the first 5 in detail, plus an aggregate summary result for the remaining occurrences with `items_count`, exactly matching our standard reporting pattern.
+  - If no artifacts are inside tagged content:
+    - Return `CheckStatus.PASS` with `items_count=valid_artifacts_count`.
+- **Zero Regression on Other PDFs**:
+  - On `58-78 (2).pdf`: 0 failed, 160 passed &rarr; Clean PASS.
+  - On `SF_Chapter 16 202-269.pdf`: 0 failed, 78 passed &rarr; Clean PASS.
+  - On `miller-cacs1e-ch02.02_updated (1).pdf`: 0 failed, 10 passed &rarr; Clean PASS.
+
+---
+
+## 5. Verification on Test Files Before Code Modifications
+
+Our standalone prototype script [`scratch/test_artifact_rule.py`](file:///c:/Users/HBS/Desktop/pdf%20checking%20tool/scratch/test_artifact_rule.py) was executed across the repository and benchmark files with these exact results:
+
+| Document | Total Pages | Passed Artifacts | Failed Artifacts (Inside Tagged Content) | Match with PAC |
+| :--- | :---: | :---: | :---: | :---: |
+| **`Work_Documentation_Administrative_Fillable_1_accessible.pdf`** | 72 | 356 | **41** (Pages 27, 29, 31, 33, 57, 59, 61, 63, 64, 65, 67, 69, 71) | **Exact 41 Errors Match** |
+| **`58-78 (2).pdf`** | 20 | 160 | **0** | **Exact 0 Errors Match** |
+| **`SF_Chapter 16 202-269.pdf`** | 68 | 78 | **0** | **Exact 0 Errors Match** |
+| **`miller-cacs1e-ch02.02_updated (1).pdf`** | 10 | 10 | **0** | **Exact 0 Errors Match** |
+| **`accessible_sample.pdf`** | 1 | 0 | **0** | **Pass (No Regression)** |
+| **`inaccessible_untagged_sample.pdf`** | 1 | 0 | **0** | **Pass (No Regression)** |
+
+---
+
+Please review this Phase 1 inspection report and proposed fix. Once you confirm, I will proceed with Phase 2 (Implementation) and Phase 3 (Testing & PAC Comparison).
