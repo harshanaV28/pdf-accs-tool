@@ -336,3 +336,76 @@ def test_list_structure_hierarchy_rule():
     res_none = rule.evaluate(doc_none)
     assert any(r.status == CheckStatus.PASS and "No lists" in r.message for r in res_none)
 
+
+def test_form_field_accessibility_duplicate_and_unnamed_counting():
+    """Tests that FormFieldAccessibilityRule counts passed/failed fields by object identity."""
+    from src.pdf_inspector.engine.pdf_ua.form_rules import FormFieldAccessibilityRule
+    from src.pdf_inspector.core.models import FormFieldModel
+    rule = FormFieldAccessibilityRule()
+
+    # Case 1: Multiple unnamed fields failing
+    f1 = FormFieldModel(name="UnnamedField", field_type="Text", tooltip=None, page=1)
+    f2 = FormFieldModel(name="UnnamedField", field_type="Text", tooltip=None, page=2)
+    f3 = FormFieldModel(name="ValidField", field_type="Text", tooltip="Valid description", page=3)
+
+    doc = PDFDocumentModel(
+        filepath="", filename="form.pdf", filesize=100, pdf_version="1.7",
+        page_count=3, is_tagged=True, form_fields=[f1, f2, f3]
+    )
+    res = rule.evaluate(doc)
+    pass_res = [r for r in res if r.status == CheckStatus.PASS]
+    fail_res = [r for r in res if r.status == CheckStatus.FAIL]
+
+    assert len(pass_res) == 1
+    assert pass_res[0].items_count == 1
+    assert "1 of 3 form field(s)" in pass_res[0].message
+    assert len(fail_res) == 4  # 2 missing TU + 2 unnamed name failures
+
+
+def test_figure_alt_text_decorative_filtering():
+    """Tests that decorative figures marked as artifacts are skipped from missing alt text failures."""
+    from src.pdf_inspector.engine.pdf_ua.alt_text_rules import FigureAlternativeTextRule
+    rule = FigureAlternativeTextRule()
+
+    # Decorative figure with /Placement /Background or /Artifact
+    fig_dec = StructureNode(
+        id="f1", tag="Figure", standard_tag="Figure", page=1,
+        attributes={"Placement": "/Background"}, is_artifact=True
+    )
+    # Informative figure without alt
+    fig_info = StructureNode(
+        id="f2", tag="Figure", standard_tag="Figure", page=2,
+        alt_text=None, actual_text=None
+    )
+    root = StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[fig_dec, fig_info])
+    doc = PDFDocumentModel(
+        filepath="", filename="fig.pdf", filesize=100, pdf_version="1.7",
+        page_count=2, is_tagged=True, structure_tree=root
+    )
+    res = rule.evaluate(doc)
+    fail_res = [r for r in res if r.status == CheckStatus.FAIL]
+    assert len(fail_res) == 1
+    assert fail_res[0].page == 2  # Only fig_info on page 2 failed
+
+
+def test_figure_bounding_box_multi_page_spanned():
+    """Tests that FigureBoundingBoxRule detects page-spanning figures via pages_spanned."""
+    from src.pdf_inspector.engine.pdf_ua.structure_rules import FigureBoundingBoxRule
+    rule = FigureBoundingBoxRule()
+
+    # Multi-page figure spanning page 1 and page 2 without BBox
+    fig_multi = StructureNode(
+        id="f_multi", tag="Figure", standard_tag="Figure", page=1,
+        pages_spanned=[1, 2], has_explicit_bbox=False
+    )
+    root = StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[fig_multi])
+    doc = PDFDocumentModel(
+        filepath="", filename="multi_fig.pdf", filesize=100, pdf_version="1.7",
+        page_count=2, is_tagged=True, structure_tree=root
+    )
+    res = rule.evaluate(doc)
+    fail_res = [r for r in res if r.status == CheckStatus.FAIL]
+    assert len(fail_res) == 1
+    assert "spans 2 pages" in fail_res[0].message
+
+

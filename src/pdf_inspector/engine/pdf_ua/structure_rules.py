@@ -541,13 +541,13 @@ class FigureBoundingBoxRule(BaseRule):
                     continue
 
             # 2. Matterhorn 19-001: Figure spanning more than one page requires page-specific BBox attributes
-            # Check if figure spans multiple pages
-            pages_spanned = set()
-            if fig.page:
-                pages_spanned.add(fig.page)
-            for c in fig.children:
-                if c.page:
-                    pages_spanned.add(c.page)
+            pages_spanned = set(fig.pages_spanned) if fig.pages_spanned else set()
+            if not pages_spanned:
+                if fig.page:
+                    pages_spanned.add(fig.page)
+                for c in fig.children:
+                    if c.page:
+                        pages_spanned.add(c.page)
 
             if len(pages_spanned) > 1 and not fig.has_explicit_bbox and raw_bbox is None:
                 failing_figures.append((

@@ -66,8 +66,8 @@ class FormFieldAccessibilityRule(BaseRule):
                     items_count=1
                 ))
 
-        failing_field_names = set(f.name for f in missing_tu) | set(f.name for f in unnamed_fields)
-        passed_count = len(doc.form_fields) - len(failing_field_names)
+        failing_field_ids = set(id(f) for f in missing_tu) | set(id(f) for f in unnamed_fields)
+        passed_count = len(doc.form_fields) - len(failing_field_ids)
         if passed_count > 0:
             results.append(self.create_result(
                 status=CheckStatus.PASS,

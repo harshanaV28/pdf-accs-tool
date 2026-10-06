@@ -47,8 +47,13 @@ class FigureAlternativeTextRule(BaseRule):
         placeholder_alt = []
 
         for node in all_graphics:
+            if node.is_decorative():
+                continue
             alt = (node.alt_text or node.actual_text or "").strip()
-            page = node.page or 1
+            page = node.page
+            if page is None and node.pages_spanned:
+                page = node.pages_spanned[0]
+            page = page or 1
             bbox = node.bbox
 
             if not alt:

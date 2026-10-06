@@ -193,18 +193,21 @@ class StructureTreeParser:
             if elem_type == "/MCR":
                 # Marked Content Reference
                 mcid = int(item.get("/MCID", -1))
+                pg_ref = item.get("/Pg")
+                target_page = self._resolve_page_number(pg_ref) if pg_ref else parent_node.page
                 if mcid >= 0:
                     parent_node.mcids.append(mcid)
-                pg_ref = item.get("/Pg")
-                if pg_ref and parent_node.page is None:
-                    parent_node.page = self._resolve_page_number(pg_ref)
+                    parent_node.mcid_entries.append((mcid, target_page))
+                if target_page and parent_node.page is None:
+                    parent_node.page = target_page
                 return
 
             if elem_type == "/OBJR":
                 # Object reference
                 pg_ref = item.get("/Pg")
-                if pg_ref and parent_node.page is None:
-                    parent_node.page = self._resolve_page_number(pg_ref)
+                target_page = self._resolve_page_number(pg_ref) if pg_ref else parent_node.page
+                if target_page and parent_node.page is None:
+                    parent_node.page = target_page
                 return
 
             # Structural element /StructElem
@@ -307,6 +310,9 @@ class StructureTreeParser:
 
             # Fast bottom-up post-order collection of pages spanned (O(1) per node)
             spanned = set([child_node.page] if child_node.page else [])
+            for mcid, pg in child_node.mcid_entries:
+                if pg:
+                    spanned.add(pg)
             for c in child_node.children:
                 spanned.update(c.pages_spanned)
             child_node.pages_spanned = sorted(list(spanned))
@@ -315,28 +321,42 @@ class StructureTreeParser:
 
         elif isinstance(item, (int, pikepdf.Integer)):
             # Direct MCID on parent
-            parent_node.mcids.append(int(item))
+            mcid = int(item)
+            parent_node.mcids.append(mcid)
+            parent_node.mcid_entries.append((mcid, parent_node.page))
             self._link_mcid_data(parent_node)
 
     def _link_mcid_data(self, node: StructureNode):
         """Populates node.text_content and node.bbox from real page MCID records."""
-        if not node.page or not node.mcids:
-            return
-
-        page_data = self.page_mcid_data.get(node.page)
-        if not page_data:
+        if not node.mcids:
             return
 
         texts: List[str] = []
         bboxes: List[Tuple[float, float, float, float]] = []
 
-        for mcid in node.mcids:
-            if mcid in page_data:
+        if node.mcid_entries:
+            for mcid, pg in node.mcid_entries:
+                pg_num = pg or node.page
+                if not pg_num:
+                    continue
+                page_data = self.page_mcid_data.get(pg_num)
+                if not page_data or mcid not in page_data:
+                    continue
                 txt, box = page_data[mcid]
                 if txt:
                     texts.append(txt)
                 if box and any(c > 0 for c in box):
                     bboxes.append(box)
+        elif node.page:
+            page_data = self.page_mcid_data.get(node.page)
+            if page_data:
+                for mcid in node.mcids:
+                    if mcid in page_data:
+                        txt, box = page_data[mcid]
+                        if txt:
+                            texts.append(txt)
+                        if box and any(c > 0 for c in box):
+                            bboxes.append(box)
 
         if texts and not node.text_content:
             node.text_content = " ".join(texts)
