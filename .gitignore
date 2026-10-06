@@ -73,3 +73,17 @@ $RECYCLE.BIN/
 # Temporary outputs
 temp_reports/
 *.tmp
+
+# PAC reference/test corpus
+test_corpus/
+
+# Temporary investigation and debug files
+scratch/
+
+# Generated regression reports
+REPORT/*.json
+REPORT/*.md
+
+# Generated accessibility report exports
+*_accessibility_report.pdf
+*_accessibility_report.html

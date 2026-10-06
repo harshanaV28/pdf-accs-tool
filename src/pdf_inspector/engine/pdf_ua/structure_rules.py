@@ -1,32 +1,89 @@
 """
-Structure Elements & Tree Rules (ISO 14289-1, Clause 7.1 & 7.4)
-Validates logical tag hierarchy, proper nesting of lists/tables/headings, and structure tree integrity.
+Structure Elements & Tree Rules (ISO 14289-1:2014, Clause 7.1 & 7.4, ISO 32000-1:2008 Clause 14.8.4)
+Validates logical tag hierarchy, proper containment & admissibility of lists/tables/headings/containers,
+empty elements, and figure bounding boxes according to the Matterhorn Protocol.
 """
 
 from typing import List, Optional, Tuple, Dict, Any, Set
+import re
 from ..rule_base import BaseRule
 from ...core.models import PDFDocumentModel, CheckResult, CheckStatus, Severity, StructureNode
+from ...core.structure_tree import (
+    STANDARD_STRUCTURE_TYPES_EXACT,
+    GROUPING_ROLES,
+    BLOCK_ROLES,
+    LIST_ROLES,
+    TABLE_ROLES,
+    INLINE_ROLES,
+    ILLUSTRATION_ROLES,
+    resolve_role
+)
+
+# Inadmissible parent -> child relationships according to ISO 32000-1 Clause 14.8.4
+INADMISSIBLE_CHILDREN_MAP: Dict[str, Set[str]] = {
+    # Paragraphs / Headings cannot contain major grouping sections, tables, lists, or other paragraphs
+    "P": {"Document", "Part", "Art", "Sect", "Table", "L", "H", "H1", "H2", "H3", "H4", "H5", "H6", "P"},
+    "H": {"Document", "Part", "Art", "Sect", "Table", "L", "H", "H1", "H2", "H3", "H4", "H5", "H6", "P"},
+    "H1": {"Document", "Part", "Art", "Sect", "Table", "L", "H", "H1", "H2", "H3", "H4", "H5", "H6", "P"},
+    "H2": {"Document", "Part", "Art", "Sect", "Table", "L", "H", "H1", "H2", "H3", "H4", "H5", "H6", "P"},
+    "H3": {"Document", "Part", "Art", "Sect", "Table", "L", "H", "H1", "H2", "H3", "H4", "H5", "H6", "P"},
+    "H4": {"Document", "Part", "Art", "Sect", "Table", "L", "H", "H1", "H2", "H3", "H4", "H5", "H6", "P"},
+    "H5": {"Document", "Part", "Art", "Sect", "Table", "L", "H", "H1", "H2", "H3", "H4", "H5", "H6", "P"},
+    "H6": {"Document", "Part", "Art", "Sect", "Table", "L", "H", "H1", "H2", "H3", "H4", "H5", "H6", "P"},
+
+    # Inline elements cannot contain block/grouping elements
+    "Span": {"Document", "Part", "Art", "Sect", "Div", "P", "H", "H1", "H2", "H3", "H4", "H5", "H6", "Table", "L", "TR", "TH", "TD", "LI"},
+    "Quote": {"Document", "Part", "Art", "Sect", "Table", "L", "H1", "H2", "H3", "H4", "H5", "H6"},
+    "Code": {"Document", "Part", "Art", "Sect", "Div", "P", "H1", "H2", "H3", "H4", "H5", "H6", "Table", "L"},
+    "Link": {"Document", "Part", "Art", "Sect", "Div", "P", "H1", "H2", "H3", "H4", "H5", "H6", "Table", "L"},
+    "Annot": {"Document", "Part", "Art", "Sect", "Div", "P", "H1", "H2", "H3", "H4", "H5", "H6", "Table", "L"},
+
+    # List label should only contain inline items and marked content
+    "Lbl": {"Document", "Part", "Art", "Sect", "Div", "P", "H", "H1", "H2", "H3", "H4", "H5", "H6", "Table", "L", "LI"},
+
+    # List body can contain block and inline elements but not document-level grouping sections
+    "LBody": {"Document", "Part", "Art", "Sect"},
+
+    # List container must only contain LI and Caption
+    "L": {"Document", "Part", "Art", "Sect", "Div", "P", "H", "H1", "H2", "H3", "H4", "H5", "H6", "Table", "Span", "Link", "Quote"},
+
+    # List item must only contain Lbl and LBody
+    "LI": {"Document", "Part", "Art", "Sect", "Div", "P", "H", "H1", "H2", "H3", "H4", "H5", "H6", "Table", "L", "Span", "Link"},
+
+    # Table container must only contain TR, THEAD, TBODY, TFOOT, Caption
+    "Table": {"Document", "Part", "Art", "Sect", "Div", "P", "H", "H1", "H2", "H3", "H4", "H5", "H6", "L", "Span", "Link", "TH", "TD"},
+
+    # Table row must only contain TH, TD
+    "TR": {"Document", "Part", "Art", "Sect", "Div", "P", "H", "H1", "H2", "H3", "H4", "H5", "H6", "Table", "L", "Span", "Link", "TR"},
+
+    # Table cells (TH, TD) cannot contain document-level grouping sections
+    "TH": {"Document", "Part", "Art", "Sect"},
+    "TD": {"Document", "Part", "Art", "Sect"},
+
+    # Captions and Notes
+    "Caption": {"Document", "Part", "Art", "Sect", "Table", "L"},
+    "Note": {"Document", "Part", "Art", "Sect"}
+}
 
 
 class StructureTreeIntegrityRule(BaseRule):
     rule_id = "PDFUA-TREE-001"
-    name = "Structure Tree Root"
+    name = "Structure Tree Hierarchy & Containment"
     category = "Structure tree"
     standard = "PDF/UA"
     severity = Severity.CRITICAL
-    description = "The structure tree must have a valid StructTreeRoot and compliant structural hierarchy."
-    remediation_template = "Ensure the structure tree is tagged and elements are nested logically."
+    description = "The structure tree must have a valid StructTreeRoot and compliant structural hierarchy without inadmissible containment (ISO 14289-1, Clause 7.1 / Matterhorn 14-001, 14-002, 13-006)."
+    remediation_template = "Ensure the structure tree is tagged and elements are nested logically according to ISO 32000-1."
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
         results = []
         if not doc.structure_tree:
             results.append(self.create_result(
                 status=CheckStatus.FAIL,
-                message="No StructTreeRoot exists in the document.",
+                message="No StructTreeRoot exists in the document (Matterhorn 14-001).",
                 evidence="StructTreeRoot is missing from Catalog.",
                 custom_severity=Severity.CRITICAL,
-                custom_remediation="Add structural tags to the document using an accessible PDF creator or Acrobat Pro.",
-                items_count=1
+                custom_remediation="Add structural tags to the document using an accessible PDF creator or Acrobat Pro."
             ))
             return results
 
@@ -34,10 +91,9 @@ class StructureTreeIntegrityRule(BaseRule):
         if not root_children:
             results.append(self.create_result(
                 status=CheckStatus.FAIL,
-                message="StructTreeRoot contains no children (empty structure tree).",
+                message="StructTreeRoot contains no children (empty structure tree) (Matterhorn 14-002).",
                 evidence="StructTreeRoot /K is empty.",
-                custom_remediation="Ensure tags contain document content.",
-                items_count=1
+                custom_remediation="Ensure tags contain document content."
             ))
             return results
 
@@ -57,32 +113,24 @@ class StructureTreeIntegrityRule(BaseRule):
         invalid_nodes = []
         warned_nodes = []
 
-        grouping_tags = {
-            "DOCUMENT", "PART", "ART", "SECT", "DIV", "BLOCKQUOTE",
-            "TOC", "TOCI", "INDEX", "NONSTRUCT", "PRIVATE"
-        }
-        inline_leaf_types = {"FIGURE", "FORMULA", "FORM", "NOTE"}
-
-        import re
         heading_pat = re.compile(r"^H([1-6])$", re.IGNORECASE)
         heading_nodes = []
 
-        # Collect headings for hierarchy check
-        for node in all_nodes:
-            std_upper = (node.standard_tag or "").upper()
-            m = heading_pat.match(std_upper)
+        for node, parent in nodes_with_parents:
+            std_role = node.standard_tag or "Span"
+            std_upper = std_role.upper()
+            raw_upper = (node.tag or "").upper()
+
+            # Heading hierarchy tracking
+            m = heading_pat.match(std_role)
             if m:
                 heading_nodes.append((int(m.group(1)), node))
-
-        for node, parent in nodes_with_parents:
-            std_upper = (node.standard_tag or "").upper()
-            raw_upper = (node.tag or "").upper()
 
             # 1. Missing or empty tag type
             if not node.tag or not node.standard_tag:
                 invalid_nodes.append((
                     node,
-                    "Structure element has missing or empty tag type.",
+                    "Structure element has missing or empty tag type (Matterhorn 13-004).",
                     f"Node ID: {node.id}",
                     "Ensure all tags in the structure tree define a valid structure type."
                 ))
@@ -92,75 +140,57 @@ class StructureTreeIntegrityRule(BaseRule):
             if node.is_artifact or std_upper == "ARTIFACT" or raw_upper == "ARTIFACT" or node.attributes.get("O") == "/Artifact":
                 invalid_nodes.append((
                     node,
-                    f"Artifact structure element <{node.tag}> must not be present in the structure tree.",
+                    f"Artifact structure element <{node.tag}> must not be present in the structure tree (Matterhorn 01-001).",
                     f"Artifact on page {node.page or 1}",
                     "Remove artifact elements from the structure tree or mark as pagination/background artifacts."
                 ))
                 continue
 
-            # 3. Missing /Pg on element with marked content (Matterhorn 13-001, ISO 32000-1 Table 323)
-            if node.mcids and not node.page and not node.has_pg_attr:
-                invalid_nodes.append((
-                    node,
-                    f"Structure element <{node.tag}> contains marked content but lacks an explicit page reference (/Pg).",
-                    f"Element ID: {node.id}",
-                    "Ensure structure element specifies target page in /Pg dictionary entry."
-                ))
-                continue
+            # 3. Inadmissible containment / placement warnings in structure tree (Matterhorn 13-006 / ISO 32000-1 Clause 14.8.4)
+            if parent is not None and parent.tag != "StructTreeRoot":
+                p_std_role = parent.standard_tag or "Span"
+                if p_std_role in INADMISSIBLE_CHILDREN_MAP:
+                    inadmissible = INADMISSIBLE_CHILDREN_MAP[p_std_role]
+                    if std_role in inadmissible:
+                        warned_nodes.append((
+                            node,
+                            f'Possibly inappropriate use of a "{node.tag}" structure element. Element resolved to <{std_role}> is placed inside <{parent.tag}> (resolved to <{p_std_role}>) (Matterhorn 13-006).',
+                            f"<{node.tag}> inside <{parent.tag}> on page {node.page or parent.page or 1}",
+                            f"Restructure tags so <{node.tag}> is placed in an admissible container according to ISO 32000-1."
+                        ))
 
-            # 4. Empty structure element (Matterhorn 13-005)
-            has_content = bool(
-                node.children
-                or node.mcids
-                or node.alt_text
-                or node.actual_text
-                or node.title
-                or node.expanded_text
-                or (node.text_content and node.text_content.strip())
+            # 4. Inline element at block level without Placement=Block
+            parent_is_block = (
+                parent is None
+                or parent.tag == "StructTreeRoot"
+                or (parent.standard_tag or "").upper() in ("DOCUMENT", "PART", "ART", "SECT", "DIV")
             )
-            if not has_content and std_upper not in grouping_tags:
-                invalid_nodes.append((
-                    node,
-                    f"Empty structure element <{node.tag}> has no child tags or marked content.",
-                    f"<{node.tag}> on page {node.page or 1} is empty.",
-                    "Remove empty tags from the tag tree or assign content to them."
-                ))
-                continue
-
-            # 5. Possibly inappropriate use of structure element (Matterhorn 01-006)
-            if std_upper in inline_leaf_types:
-                parent_is_block = (
-                    parent is None
-                    or parent.tag == "StructTreeRoot"
-                    or (parent.standard_tag or "").upper() in ("DOCUMENT", "PART", "ART", "SECT", "DIV")
-                )
-                placement = node.attributes.get("Placement", "").strip("/ ").lower()
-                if parent_is_block and placement != "block":
+            if (std_role in ILLUSTRATION_ROLES or std_role in INLINE_ROLES) and parent_is_block:
+                placement = (node.placement or node.attributes.get("Placement", "")).strip("/ ").lower()
+                if placement != "block":
                     warned_nodes.append((
                         node,
-                        f'Possibly inappropriate use of a "{node.tag}" structure element. Inline element is used at block level without Placement=Block attribute.',
+                        f'Possibly inappropriate use of a "{node.tag}" structure element. Inline element is used at block level without Placement=Block attribute (Matterhorn 13-007).',
                         f"<{node.tag}> on page {node.page or 1}",
                         f'Set Placement=Block attribute on <{node.tag}> or wrap inside a paragraph element.'
                     ))
-                    continue
 
-            # 6. Structural container without children or content (Matterhorn 13-008)
-            if std_upper in ("SECT", "DIV", "PART", "ART") and not node.children and not node.mcids:
+            # 5. Structural container without children or content (Matterhorn 13-008)
+            if std_role in ("Sect", "Div", "Part", "Art") and not node.children and not node.mcids:
                 warned_nodes.append((
                     node,
-                    f"Structural container <{node.tag}> in structure tree has no children or content.",
+                    f"Structural container <{node.tag}> in structure tree has no children or content (Matterhorn 13-008).",
                     f"Empty container on page {node.page or 1}",
                     "Remove or populate empty container tags in the structure tree."
                 ))
-                continue
 
-        # Check 7: Heading hierarchy
+        # Check 6: Heading hierarchy in tree (Matterhorn 13-003)
         if heading_nodes:
             first_lvl, first_node = heading_nodes[0]
             if first_lvl != 1:
                 warned_nodes.append((
                     first_node,
-                    f"First heading in structure tree is <{first_node.tag}> (level {first_lvl}) instead of <H1>.",
+                    f"First heading in structure tree is <{first_node.tag}> (level {first_lvl}) instead of <H1> (Matterhorn 13-003).",
                     f"First heading on page {first_node.page or 1}",
                     "Start document heading hierarchy with an <H1> title."
                 ))
@@ -170,20 +200,13 @@ class StructureTreeIntegrityRule(BaseRule):
                 if lvl > prev_lvl + 1:
                     warned_nodes.append((
                         h_node,
-                        f"Structure tree heading hierarchy skips from H{prev_lvl} to H{lvl}.",
+                        f"Structure tree heading hierarchy skips from H{prev_lvl} to H{lvl} (Matterhorn 13-003).",
                         f"Tag <{h_node.tag}> on page {h_node.page or 1}",
                         f"Demote to H{prev_lvl + 1} or insert intervening H{prev_lvl + 1} section."
                     ))
                 prev_lvl = lvl
-        elif all_nodes:
-            top_node = all_nodes[0]
-            warned_nodes.append((
-                top_node,
-                f"Document structure tree contains no <H1> heading element.",
-                f"<{top_node.tag}> on page {top_node.page or 1}",
-                "Add an <H1> heading element to establish the document title hierarchy."
-            ))
 
+        # Record FAIL findings
         if invalid_nodes:
             for node, msg, evid, remed in invalid_nodes[:5]:
                 results.append(self.create_result(
@@ -207,6 +230,7 @@ class StructureTreeIntegrityRule(BaseRule):
                     items_count=rem_fail
                 ))
 
+        # Record WARNING findings
         if warned_nodes:
             for node, msg, evid, remed in warned_nodes[:5]:
                 results.append(self.create_result(
@@ -244,118 +268,174 @@ class StructureTreeIntegrityRule(BaseRule):
 
 class StructureNestingRule(BaseRule):
     rule_id = "PDFUA-STRUCT-001"
-    name = "Structure Elements Nesting"
+    name = "Structure Elements Validation & Nesting"
     category = "Structure elements"
     standard = "PDF/UA"
     severity = Severity.HIGH
-    description = "Structural elements must be nested logically according to ISO 32000-1 (e.g. TR inside Table, LI inside L, Lbl/LBody inside LI)."
-    remediation_template = "Fix nesting in the Tag Tree so lists contain LI, LI contains Lbl/LBody, tables contain TR, and TR contains TH/TD."
+    description = "Structural elements must satisfy element-specific rules, satisfy Placement attributes, and reference pages properly (ISO 14289-1, Clause 7.1 / Matterhorn 13-001, 13-002, 13-007)."
+    remediation_template = "Fix structure element attributes and nesting in the Tag Tree so element rules are satisfied."
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
         results = []
         if not doc.structure_tree:
             return results
 
-        all_nodes = [n for n in doc.structure_tree.find_all_nodes() if n.tag != "StructTreeRoot"]
-        nesting_errors = []
+        # Collect all nodes with parent
+        nodes_with_parents: List[Tuple[StructureNode, Optional[StructureNode]]] = []
 
-        for node in all_nodes:
-            tag = node.standard_tag.upper()
+        def _walk_tree(curr: StructureNode, parent: Optional[StructureNode]):
+            if curr.tag != "StructTreeRoot":
+                nodes_with_parents.append((curr, parent))
+            for child in curr.children:
+                _walk_tree(child, curr)
 
-            # Check Table children
-            if tag == "TABLE":
+        _walk_tree(doc.structure_tree, None)
+
+        all_nodes = [n for n, _ in nodes_with_parents]
+        if not all_nodes:
+            return results
+
+        invalid_nodes = []
+
+        for node, parent in nodes_with_parents:
+            std_role = node.standard_tag or "Span"
+            std_upper = std_role.upper()
+            raw_upper = (node.tag or "").upper()
+
+            # 1. Missing or empty tag type (Matterhorn 13-004)
+            if not node.tag or not node.standard_tag:
+                invalid_nodes.append((
+                    node,
+                    "Structure element has missing or empty tag type (Matterhorn 13-004).",
+                    f"Node ID: {node.id}",
+                    "Ensure all tags in the structure tree define a valid structure type."
+                ))
+                continue
+
+            # 1b. Artifact in Structure Tree (Matterhorn 01-001)
+            if node.is_artifact or std_upper == "ARTIFACT" or raw_upper == "ARTIFACT" or node.attributes.get("O") == "/Artifact":
+                invalid_nodes.append((
+                    node,
+                    f"Artifact structure element <{node.tag}> must not be present in the structure tree (Matterhorn 01-001).",
+                    f"Artifact on page {node.page or 1}",
+                    "Remove artifact elements from the structure tree or mark as pagination/background artifacts."
+                ))
+                continue
+
+            # 2. Missing /Pg on element with marked content (Matterhorn 13-001, ISO 32000-1 Table 323)
+            if node.mcids and not node.page and not node.has_pg_attr:
+                invalid_nodes.append((
+                    node,
+                    f"Structure element <{node.tag}> contains marked content but lacks an explicit page reference (/Pg) (Matterhorn 13-001).",
+                    f"Element ID: {node.id}",
+                    "Ensure structure element specifies target page in /Pg dictionary entry."
+                ))
+                continue
+
+            # 3. Inline element at block level without Placement=Block (Matterhorn 13-007)
+            parent_is_grouping_or_block = (
+                parent is None
+                or parent.tag == "StructTreeRoot"
+                or (parent.standard_tag or "").upper() in ("DOCUMENT", "PART", "ART", "SECT", "DIV")
+            )
+            if (std_role in ILLUSTRATION_ROLES or std_role in INLINE_ROLES) and parent_is_grouping_or_block:
+                placement = (node.placement or node.attributes.get("Placement", "")).strip("/ ").lower()
+                if placement != "block":
+                    invalid_nodes.append((
+                        node,
+                        f'Possibly inappropriate use of a "{node.tag}" structure element. Inline element is used at block level without Placement=Block attribute (Matterhorn 13-007).',
+                        f"<{node.tag}> on page {node.page or 1}",
+                        f'Set Placement=Block attribute on <{node.tag}> or wrap inside a paragraph element.'
+                    ))
+                    continue
+
+            # 4. Specific List Item children check (Matterhorn 13-002)
+            if std_role == "LI":
                 for child in node.children:
-                    ctag = child.standard_tag.upper()
-                    if ctag not in ("TR", "THEAD", "TBODY", "TFOOT", "CAPTION"):
-                        nesting_errors.append((f"<Table> should only contain TR/Caption/Thead/Tbody, found <{child.tag}>", node.page or child.page or 1, f"Table > {child.tag}"))
-
-            # Check Thead/Tbody/Tfoot children
-            elif tag in ("THEAD", "TBODY", "TFOOT"):
-                for child in node.children:
-                    ctag = child.standard_tag.upper()
-                    if ctag not in ("TR",):
-                        nesting_errors.append((f"<{node.tag}> should only contain TR, found <{child.tag}>", node.page or child.page or 1, f"{node.tag} > {child.tag}"))
-
-            # Check TR children
-            elif tag == "TR":
-                for child in node.children:
-                    ctag = child.standard_tag.upper()
-                    if ctag not in ("TH", "TD"):
-                        nesting_errors.append((f"<TR> should only contain TH or TD, found <{child.tag}>", node.page or child.page or 1, f"TR > {child.tag}"))
-
-            # Check List children
-            elif tag == "L":
-                for child in node.children:
-                    ctag = child.standard_tag.upper()
-                    if ctag not in ("LI", "CAPTION"):
-                        nesting_errors.append((f"<L> (List) should only contain LI, found <{child.tag}>", node.page or child.page or 1, f"L > {child.tag}"))
-
-            # Check List Item children (ISO 14289-1 Clause 7.1, Matterhorn Checkpoint 13-002)
-            elif tag == "LI":
-                for child in node.children:
-                    ctag = child.standard_tag.upper()
-                    if ctag not in ("LBL", "LBODY"):
-                        nesting_errors.append((
-                            f"<LI> (List Item) contains invalid child element <{child.tag}>. An <LI> element must contain only <Lbl> and/or <LBody>.",
-                            node.page or child.page or 1,
-                            f"LI > {child.tag}"
+                    ctag = child.standard_tag or "Span"
+                    if ctag not in ("Lbl", "LBody"):
+                        invalid_nodes.append((
+                            node,
+                            f"<LI> (List Item) contains invalid child element <{child.tag}>. An <LI> element must contain only <Lbl> and/or <LBody> (Matterhorn 13-002).",
+                            f"LI > {child.tag} on page {node.page or child.page or 1}",
+                            "Rearrange list item tags so LI only contains Lbl and LBody."
                         ))
 
-        headings = [n for n in all_nodes if n.standard_tag.upper() in ("H", "H1", "H2", "H3", "H4", "H5", "H6")]
-        lists = [n for n in all_nodes if n.standard_tag.upper() == "L"]
-        tables = [n for n in all_nodes if n.standard_tag.upper() in ("TABLE", "THEAD", "TBODY", "TFOOT", "TR", "TH", "TD", "CAPTION")]
-        grouping = [n for n in all_nodes if n.standard_tag.upper() in ("DOCUMENT", "PART", "ART", "SECT", "DIV", "BLOCKQUOTE", "TOC", "TOCI")]
-        total_eval = len(headings) + len(lists) + len(tables) + len(grouping)
+            # 5. Specific Table children check (ISO 32000-1 Table 337)
+            if std_role == "Table":
+                for child in node.children:
+                    ctag = child.standard_tag or "Span"
+                    if ctag not in ("TR", "THEAD", "TBODY", "TFOOT", "Caption"):
+                        invalid_nodes.append((
+                            node,
+                            f"<Table> should only contain TR/Caption/Thead/Tbody, found <{child.tag}> (resolved to <{ctag}>)",
+                            f"Table > {child.tag} on page {node.page or child.page or 1}",
+                            "Rearrange table tags so Table only contains TR/Caption/Thead/Tbody."
+                        ))
+            elif std_role in ("THEAD", "TBODY", "TFOOT"):
+                for child in node.children:
+                    ctag = child.standard_tag or "Span"
+                    if ctag not in ("TR",):
+                        invalid_nodes.append((
+                            node,
+                            f"<{node.tag}> should only contain TR, found <{child.tag}>",
+                            f"{node.tag} > {child.tag} on page {node.page or child.page or 1}",
+                            "Rearrange table section tags so only TR rows are contained."
+                        ))
+            elif std_role == "TR":
+                for child in node.children:
+                    ctag = child.standard_tag or "Span"
+                    if ctag not in ("TH", "TD"):
+                        invalid_nodes.append((
+                            node,
+                            f"<TR> should only contain TH or TD, found <{child.tag}>",
+                            f"TR > {child.tag} on page {node.page or child.page or 1}",
+                            "Rearrange table row tags so only TH/TD cells are contained."
+                        ))
 
-        if nesting_errors:
-            for msg, pg, obj_ref in nesting_errors[:5]:  # Report first 5
+        # Record FAIL findings
+        if invalid_nodes:
+            for node, msg, evid, remed in invalid_nodes[:5]:
                 results.append(self.create_result(
                     status=CheckStatus.FAIL,
                     message=msg,
-                    evidence=f"Invalid child relationship in structure tree: {obj_ref}",
-                    page=pg,
-                    object_reference=obj_ref,
-                    custom_remediation="Rearrange tags in Acrobat Pro Tag Tree so structural parent-child rules are satisfied.",
+                    evidence=evid,
+                    page=node.page or 1,
+                    object_reference=f"<{node.tag}>",
+                    custom_severity=Severity.HIGH,
+                    custom_remediation=remed,
                     items_count=1
                 ))
-            if len(nesting_errors) > 5:
-                rem = len(nesting_errors) - 5
+            if len(invalid_nodes) > 5:
+                rem_fail = len(invalid_nodes) - 5
                 results.append(self.create_result(
                     status=CheckStatus.FAIL,
-                    message=f"{rem} additional structural element(s) violate standard nesting rules.",
-                    evidence="Invalid child relationships in structure tree.",
-                    custom_remediation="Rearrange tags in Acrobat Pro Tag Tree.",
-                    items_count=rem
+                    message=f"{rem_fail} additional structure element(s) failed integrity requirements.",
+                    evidence=f"Structure element failures: {len(invalid_nodes)}/{len(all_nodes)}",
+                    custom_severity=Severity.HIGH,
+                    custom_remediation="Review and repair structure tags in Acrobat Pro Tag Tree.",
+                    items_count=rem_fail
                 ))
-            if total_eval == 88 or total_eval == 58:
-                passed_count = 61
-            elif total_eval == 83:
-                passed_count = 145
-            else:
-                passed_count = max(0, total_eval - len(nesting_errors))
 
-            if passed_count > 0:
-                results.append(self.create_result(
-                    status=CheckStatus.PASS,
-                    message=f"{passed_count} structural elements conform to standard nesting rules.",
-                    evidence="Nesting validation passed.",
-                    items_count=passed_count
-                ))
-        else:
-            if len(tables) == 1194 or total_eval == 83:
-                count = 145
-            elif total_eval == 88 or total_eval == 58:
-                count = 61
-            elif total_eval == 1:
-                count = 1
-            else:
-                count = max(1, total_eval)
+        # Evaluated structure element checks (lists, tables, compound structures, block/inline elements)
+        evaluated_elements = [
+            n for n in all_nodes
+            if (n.standard_tag or "") in (
+                "Table", "TR", "THEAD", "TBODY", "TFOOT", "L", "LI", "Lbl", "LBody",
+                "Figure", "Formula", "Form", "H1", "H2", "H3", "H4", "H5", "H6"
+            )
+        ]
+        # In PAC checkpoint matrix, structure elements checkpoint tracks distinct structural element units
+        # For non-empty documents with structure elements:
+        total_evaluated = len(evaluated_elements) if evaluated_elements else len(all_nodes)
+        passed_count = max(0, total_evaluated - len(invalid_nodes))
 
+        if passed_count > 0:
             results.append(self.create_result(
                 status=CheckStatus.PASS,
-                message="All structural lists, tables, and container elements conform to standard nesting rules.",
-                evidence="Nesting validation passed.",
-                items_count=count
+                message=f"{passed_count} structure elements conform to standard element requirements.",
+                evidence="Structure elements validation passed.",
+                items_count=passed_count
             ))
 
         return results
@@ -367,7 +447,7 @@ class EmptyStructureElementsRule(BaseRule):
     category = "Structure elements"
     standard = "PDF/UA"
     severity = Severity.HIGH
-    description = "Structure elements should not be empty unless they serve as structural grouping containers (ISO 14289-1, Clause 7.1)."
+    description = "Structure elements should not be empty unless they serve as structural grouping containers (ISO 14289-1, Clause 7.1 / Matterhorn 13-005)."
     remediation_template = "Delete empty tags or attach content to them."
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
@@ -379,22 +459,21 @@ class EmptyStructureElementsRule(BaseRule):
         leaf_empty = []
 
         for node in all_nodes:
-            tag = node.standard_tag.upper()
-            # Non-grouping leaf node that has no children, no MCID, no alt text, no actual text, and no title
+            std_role = node.standard_tag or "Span"
             has_text_payload = bool(
                 node.alt_text
                 or node.actual_text
                 or node.title
                 or (node.text_content and node.text_content.strip())
             )
-            if tag in ("P", "H1", "H2", "H3", "H4", "H5", "H6", "SPAN", "LINK") and not node.children and not node.mcids and not has_text_payload:
+            if std_role in ("P", "H1", "H2", "H3", "H4", "H5", "H6", "Span", "Link") and not node.children and not node.mcids and not has_text_payload:
                 leaf_empty.append((node.tag, node.page or 1))
 
         if leaf_empty:
             for tag, pg in leaf_empty[:5]:
                 results.append(self.create_result(
                     status=CheckStatus.FAIL,
-                    message=f"Empty structure element <{tag}> has no child tags or marked content.",
+                    message=f"Empty structure element <{tag}> has no child tags or marked content (Matterhorn 13-005).",
                     evidence=f"<{tag}> on page {pg} is empty.",
                     page=pg,
                     object_reference=f"<{tag}>",
@@ -429,8 +508,8 @@ class FigureBoundingBoxRule(BaseRule):
     category = "Structure elements"
     standard = "PDF/UA"
     severity = Severity.HIGH
-    description = "A structure element of type Figure that appears entirely on a single page must specify a BBox (Bounding Box) attribute (ISO 14289-1, Clause 7.3)."
-    remediation_template = "Open the Tags pane in Acrobat Pro, right-click <Figure>, select Properties > Edit Attribute Objects, and add /BBox [x0 y0 x1 y1], or retag using the Reading Order tool."
+    description = "Figure elements spanning more than one page must contain a BBox attribute for each page, and any BBox attribute present must be a valid array of four numbers (ISO 14289-1, Clause 7.18 / Matterhorn 16-001, 19-001)."
+    remediation_template = "Ensure page-spanning figures define page-specific BBox attributes, and verify that BBox attribute values are valid 4-number arrays [x0 y0 x1 y1]."
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
         results = []
@@ -438,58 +517,76 @@ class FigureBoundingBoxRule(BaseRule):
             return results
 
         all_nodes = [n for n in doc.structure_tree.find_all_nodes() if n.tag != "StructTreeRoot"]
-        figures = [n for n in all_nodes if n.standard_tag.upper() == "FIGURE"]
+        figures = [n for n in all_nodes if (n.standard_tag or "").upper() == "FIGURE"]
         if not figures:
             return results
 
         failing_figures = []
         for fig in figures:
-            has_bbox = bool(
-                "BBox" in fig.attributes
-                or "bbox" in fig.attributes
-                or fig.bbox is not None
-            )
-            if not has_bbox:
-                failing_figures.append(fig)
+            # 1. Matterhorn 16-001: If BBox attribute is present, verify it is a valid 4-number array
+            raw_bbox = fig.attributes.get("BBox") if fig.attributes else None
+            if raw_bbox is not None:
+                is_valid_bbox = (
+                    isinstance(raw_bbox, (list, tuple))
+                    and len(raw_bbox) == 4
+                    and all(isinstance(v, (int, float)) for v in raw_bbox)
+                )
+                if not is_valid_bbox:
+                    failing_figures.append((
+                        fig,
+                        "Figure element contains an invalid /BBox attribute (must be an array of four numbers) (Matterhorn 16-001).",
+                        f"Malformed BBox: {raw_bbox}",
+                        "Set /BBox attribute to a valid array of four numbers [x0 y0 x1 y1]."
+                    ))
+                    continue
+
+            # 2. Matterhorn 19-001: Figure spanning more than one page requires page-specific BBox attributes
+            # Check if figure spans multiple pages
+            pages_spanned = set()
+            if fig.page:
+                pages_spanned.add(fig.page)
+            for c in fig.children:
+                if c.page:
+                    pages_spanned.add(c.page)
+
+            if len(pages_spanned) > 1 and not fig.has_explicit_bbox and raw_bbox is None:
+                failing_figures.append((
+                    fig,
+                    f"Figure element spans {len(pages_spanned)} pages ({sorted(pages_spanned)}) but lacks a BBox attribute for each page (ISO 14289-1, Clause 7.18 / Matterhorn 19-001).",
+                    f"Multi-page figure on pages: {sorted(pages_spanned)}",
+                    "Add a /BBox attribute to each structure element representing a single page portion of the figure."
+                ))
 
         if failing_figures:
-            for fig in failing_figures[:5]:
+            for fig, msg, evid, remed in failing_figures[:5]:
                 results.append(self.create_result(
                     status=CheckStatus.FAIL,
-                    message="Figure element on a single page with no bounding box",
-                    evidence=f"<Figure> on page {fig.page or 1} lacks /BBox attribute.",
+                    message=msg,
+                    evidence=evid,
                     page=fig.page or 1,
                     object_reference="<Figure>",
                     custom_severity=Severity.HIGH,
-                    custom_remediation="Add /BBox [x0 y0 x1 y1] attribute to <Figure> tag or retag the image using Acrobat Pro Reading Order tool.",
+                    custom_remediation=remed,
                     items_count=1
                 ))
             if len(failing_figures) > 5:
                 rem = len(failing_figures) - 5
                 results.append(self.create_result(
                     status=CheckStatus.FAIL,
-                    message=f"{rem} additional Figure element(s) on a single page with no bounding box.",
-                    evidence=f"Missing /BBox attribute on {len(failing_figures)}/{len(figures)} figures.",
+                    message=f"{rem} additional Figure element(s) violate BBox requirements.",
+                    evidence=f"Failed BBox requirements on {len(failing_figures)}/{len(figures)} figures.",
                     custom_severity=Severity.HIGH,
-                    custom_remediation="Add /BBox attributes to all <Figure> tags in the tag tree.",
+                    custom_remediation="Correct /BBox attribute on multi-page and invalid figure tags.",
                     items_count=rem
                 ))
 
         passed_count = len(figures) - len(failing_figures)
-        if passed_count > 0 and len(failing_figures) > 0:
+        if passed_count > 0:
             results.append(self.create_result(
                 status=CheckStatus.PASS,
-                message=f"{passed_count} figure element(s) define a valid bounding box (BBox).",
-                evidence=f"Validated figure bounding boxes: {passed_count}/{len(figures)}",
+                message=f"{passed_count} figure element(s) conform to ISO 14289-1 bounding box requirements.",
+                evidence=f"Validated figure bounding box integrity: {passed_count}/{len(figures)}",
                 items_count=passed_count
-            ))
-        elif passed_count > 0 and len(failing_figures) == 0:
-            results.append(self.create_result(
-                status=CheckStatus.PASS,
-                message=f"All {passed_count} figure element(s) define a valid bounding box (BBox).",
-                evidence=f"Validated figure bounding boxes: {passed_count}/{len(figures)}",
-                items_count=0
             ))
 
         return results
-

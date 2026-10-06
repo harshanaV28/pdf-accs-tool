@@ -129,18 +129,18 @@ def test_pac_structure_tree_heading_warnings():
 
 
 def test_pac_tab_order_fail():
-    from src.pdf_inspector.engine.pdf_ua.document_settings_rules import DisplayDocTitleRule
+    from src.pdf_inspector.engine.pdf_ua.annotation_rules import PageTabOrderRule
     from src.pdf_inspector.core.models import StructureNode, PageModel, PDFDocumentModel, CheckStatus
 
-    rule = DisplayDocTitleRule()
-    pg = PageModel(page_number=1, width=612.0, height=792.0, has_tab_order=False, tab_order_mode="None")
+    rule = PageTabOrderRule()
+    pg = PageModel(page_number=1, width=612.0, height=792.0, has_tab_order=False, tab_order_mode="None", annotations_count=1)
     root = StructureNode("root", "StructTreeRoot", "StructTreeRoot")
     doc = PDFDocumentModel(
         filepath="", filename="taborder.pdf", filesize=100, pdf_version="1.7",
         page_count=1, is_tagged=True, structure_tree=root, pages=[pg], display_doc_title=True
     )
     res = rule.evaluate(doc)
-    tab_fails = [r for r in res if r.status == CheckStatus.FAIL and "Tab order" in r.message]
+    tab_fails = [r for r in res if r.status == CheckStatus.FAIL and "tab order" in r.message.lower()]
     assert len(tab_fails) == 1
 
 
