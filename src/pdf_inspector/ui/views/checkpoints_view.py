@@ -353,17 +353,9 @@ class CheckpointsView(QWidget):
 
         bottom_layout.addStretch()
 
-        self.btn_tree = QPushButton("🌳 Tag Tree")
-        self.btn_tree.clicked.connect(self.request_tag_tree)
-        bottom_layout.addWidget(self.btn_tree)
-
         self.btn_stats = QPushButton("📊 Statistics")
         self.btn_stats.clicked.connect(self.request_statistics)
         bottom_layout.addWidget(self.btn_stats)
-
-        self.btn_preview = QPushButton("👁 Preview")
-        self.btn_preview.clicked.connect(self.request_preview)
-        bottom_layout.addWidget(self.btn_preview)
 
         main_layout.addWidget(bottom_bar)
 
