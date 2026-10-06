@@ -312,3 +312,27 @@ def test_bookmark_structure_rule():
     res_bm = rule.evaluate(doc_with_bm)
     assert any(r.status == CheckStatus.PASS and "contains" in r.message for r in res_bm)
 
+
+def test_list_structure_hierarchy_rule():
+    from src.pdf_inspector.engine.pdf_ua.list_rules import ListStructureHierarchyRule
+    from src.pdf_inspector.core.models import ListModel, StructureNode
+    rule = ListStructureHierarchyRule()
+
+    # Case 1: Valid list structure (L -> LI -> Lbl, LBody)
+    l_good = ListModel(id="list1", page=1, items_count=3, is_valid_structure=True, has_labels=True)
+    root = StructureNode("root", "StructTreeRoot", "StructTreeRoot")
+    doc_good = PDFDocumentModel(filepath="", filename="l_good.pdf", filesize=100, pdf_version="1.7", page_count=1, structure_tree=root, lists=[l_good])
+    res_good = rule.evaluate(doc_good)
+    assert any(r.status == CheckStatus.PASS and "conform" in r.message for r in res_good)
+
+    # Case 2: Invalid list structure (direct non-LI child or invalid LI child)
+    l_bad = ListModel(id="list2", page=2, items_count=2, is_valid_structure=False, has_labels=False)
+    doc_bad = PDFDocumentModel(filepath="", filename="l_bad.pdf", filesize=100, pdf_version="1.7", page_count=2, structure_tree=root, lists=[l_bad])
+    res_bad = rule.evaluate(doc_bad)
+    assert any(r.status == CheckStatus.FAIL and "invalid structural hierarchy" in r.message for r in res_bad)
+
+    # Case 3: No lists in document
+    doc_none = PDFDocumentModel(filepath="", filename="l_none.pdf", filesize=100, pdf_version="1.7", page_count=1, lists=[])
+    res_none = rule.evaluate(doc_none)
+    assert any(r.status == CheckStatus.PASS and "No lists" in r.message for r in res_none)
+

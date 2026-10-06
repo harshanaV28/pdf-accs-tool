@@ -158,7 +158,7 @@ class WCAGDistinguishableRule(BaseRule):
     category = "1.4 Distinguishable"
     standard = "WCAG"
     severity = Severity.MEDIUM
-    description = "Make it easier for users to see and hear content including separating foreground from background (Contrast SC 1.4.3, Font Embedding PDF16)."
+    description = "Make it easier for users to see and hear content including separating foreground from background (Contrast SC 1.4.3, Font Embedding PDF Technique 16)."
     remediation_template = "Verify visual contrast of text against background meets 4.5:1 for regular text and 3:1 for large text."
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
@@ -167,7 +167,7 @@ class WCAGDistinguishableRule(BaseRule):
         if unembedded:
             results.append(self.create_result(
                 status=CheckStatus.FAIL,
-                message=f"{len(unembedded)} font(s) are not embedded, risking inaccurate text presentation (WCAG 1.4 / PDF16).",
+                message=f"{len(unembedded)} font(s) are not embedded, risking inaccurate text presentation (WCAG 1.4 / PDF Technique 16).",
                 evidence=f"Unembedded font(s): {', '.join(f.name for f in unembedded[:3])}",
                 page=unembedded[0].pages[0] if unembedded[0].pages else 1,
                 custom_remediation="Embed all fonts in the document."
@@ -277,7 +277,7 @@ class WCAGNavigableRule(BaseRule):
         elif not doc.display_doc_title:
             results.append(self.create_result(
                 status=CheckStatus.WARNING,
-                message="Document has a title but /DisplayDocTitle is false or missing (WCAG SC 2.4.2 / PDF18). User agents will display filename in title bar.",
+                message="Document has a title but /DisplayDocTitle is false or missing (WCAG SC 2.4.2 / PDF Technique 18). User agents will display filename in title bar.",
                 evidence=f"Title: '{doc.title}', /DisplayDocTitle: {doc.display_doc_title}",
                 custom_remediation="Set Initial View > Show > Document Title in File Properties."
             ))

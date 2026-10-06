@@ -837,12 +837,18 @@ class DocumentParser:
             li_nodes = [c for c in l_node.children if c.standard_tag.upper() == "LI"]
             has_labels = False
             # Check Matterhorn Checkpoint 28-001: All direct children of L must be LI or Caption
-            is_valid = len(l_node.children) > 0 and all(c.standard_tag.upper() in ("LI", "CAPTION") for c in l_node.children)
+            is_valid_l = len(l_node.children) > 0 and all(c.standard_tag.upper() in ("LI", "CAPTION") for c in l_node.children)
 
+            # Check Matterhorn Checkpoint 28-002: All direct children of LI must be Lbl and/or LBody
+            is_valid_li = True
             for li in li_nodes:
                 child_tags = [c.standard_tag.upper() for c in li.children]
                 if "LBL" in child_tags:
                     has_labels = True
+                if not (len(li.children) > 0 and all(t in ("LBL", "LBODY", "CAPTION") for t in child_tags)):
+                    is_valid_li = False
+
+            is_valid = is_valid_l and is_valid_li
 
             lists.append(ListModel(
                 id=f"list_{idx + 1}",
