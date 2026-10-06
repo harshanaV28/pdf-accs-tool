@@ -521,17 +521,30 @@ class FigureBoundingBoxRule(BaseRule):
         if not figures:
             return results
 
+        def _is_valid_4_number_bbox(val: Any) -> bool:
+            if val is None or isinstance(val, (str, bytes, dict)):
+                return False
+            try:
+                if len(val) == 4:
+                    import math
+                    numeric_vals = [float(x) for x in val]
+                    return all(math.isfinite(x) for x in numeric_vals)
+            except Exception:
+                return False
+            return False
+
         failing_figures = []
         for fig in figures:
             # 1. Matterhorn 16-001: If BBox attribute is present, verify it is a valid 4-number array
-            raw_bbox = fig.attributes.get("BBox") if fig.attributes else None
+            raw_bbox = None
+            if fig.attributes:
+                for k, v in fig.attributes.items():
+                    if k.lower() == "bbox":
+                        raw_bbox = v
+                        break
+
             if raw_bbox is not None:
-                is_valid_bbox = (
-                    isinstance(raw_bbox, (list, tuple))
-                    and len(raw_bbox) == 4
-                    and all(isinstance(v, (int, float)) for v in raw_bbox)
-                )
-                if not is_valid_bbox:
+                if not _is_valid_4_number_bbox(raw_bbox):
                     failing_figures.append((
                         fig,
                         "Figure element contains an invalid /BBox attribute (must be an array of four numbers) (Matterhorn 16-001).",
@@ -549,13 +562,27 @@ class FigureBoundingBoxRule(BaseRule):
                     if c.page:
                         pages_spanned.add(c.page)
 
-            if len(pages_spanned) > 1 and not fig.has_explicit_bbox and raw_bbox is None:
-                failing_figures.append((
-                    fig,
-                    f"Figure element spans {len(pages_spanned)} pages ({sorted(pages_spanned)}) but lacks a BBox attribute for each page (ISO 14289-1, Clause 7.18 / Matterhorn 19-001).",
-                    f"Multi-page figure on pages: {sorted(pages_spanned)}",
-                    "Add a /BBox attribute to each structure element representing a single page portion of the figure."
-                ))
+            if len(pages_spanned) > 1:
+                pages_with_bbox = set()
+                if _is_valid_4_number_bbox(raw_bbox) or _is_valid_4_number_bbox(fig.struct_bbox):
+                    if fig.page:
+                        pages_with_bbox.add(fig.page)
+
+                for c in fig.children:
+                    c_bbox = c.attributes.get("BBox") if c.attributes else None
+                    if _is_valid_4_number_bbox(c_bbox) or _is_valid_4_number_bbox(c.struct_bbox):
+                        if c.page:
+                            pages_with_bbox.add(c.page)
+                        elif c.pages_spanned:
+                            pages_with_bbox.update(c.pages_spanned)
+
+                if not pages_spanned.issubset(pages_with_bbox):
+                    failing_figures.append((
+                        fig,
+                        f"Figure element spans {len(pages_spanned)} pages ({sorted(pages_spanned)}) but lacks a BBox attribute for each page (ISO 14289-1, Clause 7.18 / Matterhorn 19-001).",
+                        f"Multi-page figure on pages: {sorted(pages_spanned)}, pages with BBox: {sorted(pages_with_bbox)}",
+                        "Add a /BBox attribute to each structure element representing a single page portion of the figure."
+                    ))
 
         if failing_figures:
             for fig, msg, evid, remed in failing_figures[:5]:

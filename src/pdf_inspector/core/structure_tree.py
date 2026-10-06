@@ -240,15 +240,23 @@ class StructureTreeParser:
                 nonlocal has_explicit_bbox, struct_bbox, placement
                 for k, v in ad.items():
                     k_str = str(k).strip("/")
-                    attrs[k_str] = str(v)
-                    if k_str.lower() == "bbox" and isinstance(v, (pikepdf.Array, list)) and len(v) == 4:
-                        try:
-                            struct_bbox = (float(v[0]), float(v[1]), float(v[2]), float(v[3]))
-                            has_explicit_bbox = True
-                        except Exception:
-                            pass
-                    elif k_str.lower() == "placement":
-                        placement = str(v).strip("/ ")
+                    if k_str.lower() == "bbox":
+                        if isinstance(v, (pikepdf.Array, list, tuple)):
+                            try:
+                                parsed_bbox = [float(x) for x in v]
+                                attrs[k_str] = parsed_bbox
+                                if len(parsed_bbox) == 4:
+                                    struct_bbox = (parsed_bbox[0], parsed_bbox[1], parsed_bbox[2], parsed_bbox[3])
+                                    has_explicit_bbox = True
+                            except Exception:
+                                attrs[k_str] = [str(x) for x in v]
+                                has_explicit_bbox = True
+                        else:
+                            attrs[k_str] = str(v)
+                    else:
+                        attrs[k_str] = str(v)
+                        if k_str.lower() == "placement":
+                            placement = str(v).strip("/ ")
 
             if "/A" in item:
                 a_val = item["/A"]

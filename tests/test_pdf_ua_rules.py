@@ -409,3 +409,88 @@ def test_figure_bounding_box_multi_page_spanned():
     assert "spans 2 pages" in fail_res[0].message
 
 
+def test_figure_bounding_box_comprehensive_matrix():
+    """
+    Comprehensive tests for FigureBoundingBoxRule:
+    - Single-page figure with no BBox (PASS)
+    - Single-page figure with valid 4-number BBox (PASS)
+    - Single-page figure with problematic float BBox [197.75, 581.365, 424.672, 648.236] (PASS)
+    - Single-page figure with integer BBox (PASS)
+    - Single-page figure with pikepdf.Array / Decimal BBox (PASS)
+    - Single-page figure with valid Alt and no BBox (PASS)
+    - Single-page figure with valid ActualText and no BBox (PASS)
+    - Single-page figure with malformed BBox + valid Alt (FAIL PDFUA-FIG-001)
+    - Single-page figure with fewer than 4 numbers (FAIL)
+    - Single-page figure with more than 4 numbers (FAIL)
+    - Single-page figure with non-numeric values (FAIL)
+    - Multi-page figure with page-specific BBoxes for all pages (PASS)
+    - Multi-page figure with only 1 BBox spanning 2 pages (FAIL)
+    """
+    import decimal
+    import pikepdf
+    from src.pdf_inspector.engine.pdf_ua.structure_rules import FigureBoundingBoxRule
+    rule = FigureBoundingBoxRule()
+
+    # 1. Single-page figure with no BBox (PASS - BBox is optional on single page)
+    f1 = StructureNode("f1", "Figure", "Figure", page=1, pages_spanned=[1])
+    doc1 = PDFDocumentModel(filepath="", filename="f1.pdf", filesize=100, pdf_version="1.7", page_count=1, is_tagged=True, structure_tree=StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[f1]))
+    assert all(r.status == CheckStatus.PASS for r in rule.evaluate(doc1))
+
+    # 2. Single-page figure with valid float BBox (PASS)
+    f2 = StructureNode("f2", "Figure", "Figure", page=1, pages_spanned=[1], attributes={"BBox": [197.75, 581.365, 424.672, 648.236]})
+    doc2 = PDFDocumentModel(filepath="", filename="f2.pdf", filesize=100, pdf_version="1.7", page_count=1, is_tagged=True, structure_tree=StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[f2]))
+    assert all(r.status == CheckStatus.PASS for r in rule.evaluate(doc2))
+
+    # 3. Single-page figure with integer BBox (PASS)
+    f3 = StructureNode("f3", "Figure", "Figure", page=1, pages_spanned=[1], attributes={"BBox": [0, 0, 500, 300]})
+    doc3 = PDFDocumentModel(filepath="", filename="f3.pdf", filesize=100, pdf_version="1.7", page_count=1, is_tagged=True, structure_tree=StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[f3]))
+    assert all(r.status == CheckStatus.PASS for r in rule.evaluate(doc3))
+
+    # 4. Single-page figure with pikepdf Array / Decimal BBox (PASS)
+    pike_arr = pikepdf.Array([decimal.Decimal("197.75"), decimal.Decimal("581.365"), decimal.Decimal("424.672"), decimal.Decimal("648.236")])
+    f4 = StructureNode("f4", "Figure", "Figure", page=1, pages_spanned=[1], attributes={"BBox": pike_arr})
+    doc4 = PDFDocumentModel(filepath="", filename="f4.pdf", filesize=100, pdf_version="1.7", page_count=1, is_tagged=True, structure_tree=StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[f4]))
+    assert all(r.status == CheckStatus.PASS for r in rule.evaluate(doc4))
+
+    # 5. Single-page figure with valid Alt and no BBox (PASS BBox validation)
+    f5 = StructureNode("f5", "Figure", "Figure", page=1, pages_spanned=[1], alt_text="Sales chart for 2024")
+    doc5 = PDFDocumentModel(filepath="", filename="f5.pdf", filesize=100, pdf_version="1.7", page_count=1, is_tagged=True, structure_tree=StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[f5]))
+    assert all(r.status == CheckStatus.PASS for r in rule.evaluate(doc5))
+
+    # 6. Single-page figure with valid ActualText and no BBox (PASS BBox validation)
+    f6 = StructureNode("f6", "Figure", "Figure", page=1, pages_spanned=[1], actual_text="Quarterly revenue diagram")
+    doc6 = PDFDocumentModel(filepath="", filename="f6.pdf", filesize=100, pdf_version="1.7", page_count=1, is_tagged=True, structure_tree=StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[f6]))
+    assert all(r.status == CheckStatus.PASS for r in rule.evaluate(doc6))
+
+    # 7. Single-page figure with malformed BBox (2 numbers) + valid Alt (FAIL PDFUA-FIG-001)
+    f7 = StructureNode("f7", "Figure", "Figure", page=1, pages_spanned=[1], alt_text="Company logo", attributes={"BBox": [50.0, 100.0]})
+    doc7 = PDFDocumentModel(filepath="", filename="f7.pdf", filesize=100, pdf_version="1.7", page_count=1, is_tagged=True, structure_tree=StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[f7]))
+    res7 = rule.evaluate(doc7)
+    assert any(r.status == CheckStatus.FAIL and "invalid /BBox" in r.message for r in res7)
+
+    # 8. Single-page figure with 5 numbers in BBox (FAIL)
+    f8 = StructureNode("f8", "Figure", "Figure", page=1, pages_spanned=[1], attributes={"BBox": [1.0, 2.0, 3.0, 4.0, 5.0]})
+    doc8 = PDFDocumentModel(filepath="", filename="f8.pdf", filesize=100, pdf_version="1.7", page_count=1, is_tagged=True, structure_tree=StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[f8]))
+    res8 = rule.evaluate(doc8)
+    assert any(r.status == CheckStatus.FAIL and "invalid /BBox" in r.message for r in res8)
+
+    # 9. Single-page figure with non-numeric BBox (FAIL)
+    f9 = StructureNode("f9", "Figure", "Figure", page=1, pages_spanned=[1], attributes={"BBox": ["a", "b", "c", "d"]})
+    doc9 = PDFDocumentModel(filepath="", filename="f9.pdf", filesize=100, pdf_version="1.7", page_count=1, is_tagged=True, structure_tree=StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[f9]))
+    res9 = rule.evaluate(doc9)
+    assert any(r.status == CheckStatus.FAIL and "invalid /BBox" in r.message for r in res9)
+
+    # 10. Multi-page figure with page-specific BBoxes on child figures covering all spanned pages (PASS)
+    c_p1 = StructureNode("c_p1", "Figure", "Figure", page=1, pages_spanned=[1], attributes={"BBox": [10.0, 20.0, 100.0, 200.0]})
+    c_p2 = StructureNode("c_p2", "Figure", "Figure", page=2, pages_spanned=[2], attributes={"BBox": [15.0, 25.0, 105.0, 205.0]})
+    f10 = StructureNode("f10", "Figure", "Figure", page=1, pages_spanned=[1, 2], children=[c_p1, c_p2])
+    doc10 = PDFDocumentModel(filepath="", filename="f10.pdf", filesize=100, pdf_version="1.7", page_count=2, is_tagged=True, structure_tree=StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[f10]))
+    assert all(r.status == CheckStatus.PASS for r in rule.evaluate(doc10))
+
+    # 11. Multi-page figure spanning pages 1 and 2 with ONLY 1 BBox on page 1 (FAIL Matterhorn 19-001)
+    f11 = StructureNode("f11", "Figure", "Figure", page=1, pages_spanned=[1, 2], attributes={"BBox": [10.0, 20.0, 100.0, 200.0]})
+    doc11 = PDFDocumentModel(filepath="", filename="f11.pdf", filesize=100, pdf_version="1.7", page_count=2, is_tagged=True, structure_tree=StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[f11]))
+    res11 = rule.evaluate(doc11)
+    assert any(r.status == CheckStatus.FAIL and "lacks a BBox attribute for each page" in r.message for r in res11)
+
+
