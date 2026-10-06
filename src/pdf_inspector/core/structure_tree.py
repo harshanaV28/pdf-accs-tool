@@ -34,6 +34,29 @@ STANDARD_STRUCTURE_TYPES_EXACT: Set[str] = {
 STANDARD_STRUCTURE_TYPES: Set[str] = {s.upper() for s in STANDARD_STRUCTURE_TYPES_EXACT}
 
 
+# Standard structure role classification groups defined in ISO 32000-1:2008
+GROUPING_ROLES: Set[str] = {
+    "Document", "Part", "Art", "Sect", "Div", "BlockQuote", "Caption",
+    "TOC", "TOCI", "Index", "NonStruct", "Private"
+}
+BLOCK_ROLES: Set[str] = {
+    "P", "H", "H1", "H2", "H3", "H4", "H5", "H6"
+}
+LIST_ROLES: Set[str] = {
+    "L", "LI", "Lbl", "LBody"
+}
+TABLE_ROLES: Set[str] = {
+    "Table", "TR", "TH", "TD", "THEAD", "TBODY", "TFOOT"
+}
+INLINE_ROLES: Set[str] = {
+    "Span", "Quote", "Note", "Reference", "BibEntry", "Code", "Link", "Annot",
+    "Ruby", "RB", "RT", "RP", "Warichu", "WT", "WP"
+}
+ILLUSTRATION_ROLES: Set[str] = {
+    "Figure", "Formula", "Form"
+}
+
+
 def resolve_role(tag: str, role_map: Dict[str, str]) -> Tuple[str, bool, bool]:
     """
     Resolves a structure type to its standard role via /RoleMap according to ISO 32000-1.
@@ -206,16 +229,32 @@ class StructureTreeParser:
 
             # Attributes dictionary /A
             attrs: Dict[str, Any] = {}
+            has_explicit_bbox = False
+            struct_bbox: Optional[Tuple[float, float, float, float]] = None
+            placement: Optional[str] = None
+
+            def _extract_from_attr_dict(ad: pikepdf.Dictionary):
+                nonlocal has_explicit_bbox, struct_bbox, placement
+                for k, v in ad.items():
+                    k_str = str(k).strip("/")
+                    attrs[k_str] = str(v)
+                    if k_str.lower() == "bbox" and isinstance(v, (pikepdf.Array, list)) and len(v) == 4:
+                        try:
+                            struct_bbox = (float(v[0]), float(v[1]), float(v[2]), float(v[3]))
+                            has_explicit_bbox = True
+                        except Exception:
+                            pass
+                    elif k_str.lower() == "placement":
+                        placement = str(v).strip("/ ")
+
             if "/A" in item:
                 a_val = item["/A"]
                 if isinstance(a_val, pikepdf.Dictionary):
-                    for k, v in a_val.items():
-                        attrs[str(k).strip("/")] = str(v)
-                elif isinstance(a_val, pikepdf.Array):
-                    for idx, a_elem in enumerate(a_val):
+                    _extract_from_attr_dict(a_val)
+                elif isinstance(a_val, (pikepdf.Array, list)):
+                    for a_elem in a_val:
                         if isinstance(a_elem, pikepdf.Dictionary):
-                            for k, v in a_elem.items():
-                                attrs[f"{str(k).strip('/')}_{idx}"] = str(v)
+                            _extract_from_attr_dict(a_elem)
 
             has_pg = "/Pg" in item
             pg_val = page_num if has_pg else None
@@ -240,6 +279,9 @@ class StructureTreeParser:
                 lang=lang,
                 page=page_num or parent_node.page,
                 attributes=attrs,
+                struct_bbox=struct_bbox,
+                has_explicit_bbox=has_explicit_bbox,
+                placement=placement,
                 obj_num=getattr(item, "objgen", (None, None))[0] if hasattr(item, "objgen") else None,
                 has_pg_attr=has_pg,
                 pg_attr_val=pg_val

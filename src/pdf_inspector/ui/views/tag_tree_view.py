@@ -174,8 +174,15 @@ class TagTreeView(QWidget):
         attr_lines = []
         if node.mcids:
             attr_lines.append(f"MCIDs: {node.mcids}")
+        if node.placement:
+            attr_lines.append(f"Placement: /{node.placement}")
+        if node.struct_bbox:
+            attr_lines.append(f"Struct /BBox: {[round(c, 2) for c in node.struct_bbox]}")
+        elif node.has_explicit_bbox:
+            attr_lines.append(f"Explicit /BBox: Present in attributes")
         for k, v in node.attributes.items():
-            attr_lines.append(f"{k}: {v}")
+            if k not in ("Placement", "BBox"):
+                attr_lines.append(f"{k}: {v}")
 
         self.txt_attrs.setPlainText("\n".join(attr_lines) if attr_lines else "No special attributes.")
         self.tag_selected.emit(node)

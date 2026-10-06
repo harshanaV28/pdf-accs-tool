@@ -91,6 +91,9 @@ class StructureNode:
     children: List['StructureNode'] = field(default_factory=list)
     text_content: str = ""
     bbox: Optional[Tuple[float, float, float, float]] = None
+    struct_bbox: Optional[Tuple[float, float, float, float]] = None
+    has_explicit_bbox: bool = False
+    placement: Optional[str] = None
     obj_num: Optional[int] = None
     has_pg_attr: bool = False
     pg_attr_val: Optional[int] = None
@@ -257,6 +260,23 @@ class ListModel:
 
 
 @dataclass
+class ContentOccurrenceModel:
+    """Represents a content or artifact sequence encountered in a page or XObject content stream."""
+    page_number: int
+    operator_type: str  # "text", "path", "xobject", "marked_content"
+    operator_name: str  # "Tj", "TJ", "re", "Do", "BDC", "BMC", etc.
+    mcid: Optional[int] = None
+    tag: Optional[str] = None
+    is_artifact: bool = False
+    is_inside_tagged: bool = False
+    is_inside_artifact: bool = False
+    is_unmarked_real_content: bool = False
+    xobject_name: Optional[str] = None
+    bbox: Optional[Tuple[float, float, float, float]] = None
+    snippet: str = ""
+
+
+@dataclass
 class ArtifactOccurrenceModel:
     """Represents a marked-content /Artifact sequence found in page streams or XObjects."""
     page_number: int
@@ -287,6 +307,11 @@ class PageModel:
     mcid_bboxes: Dict[int, Tuple[float, float, float, float]] = field(default_factory=dict)
     mcid_texts: Dict[int, str] = field(default_factory=dict)
     artifacts: List[ArtifactOccurrenceModel] = field(default_factory=list)
+    content_occurrences: List[ContentOccurrenceModel] = field(default_factory=list)
+    unmarked_real_content_count: int = 0
+    tagged_in_artifact_count: int = 0
+    artifact_in_tagged_count: int = 0
+    annotations_count: int = 0
 
 
 @dataclass
@@ -311,7 +336,14 @@ class PDFDocumentModel:
     allows_extraction: bool = True
     display_doc_title: bool = False
     has_suspects: bool = False
+    doc_info_title: Optional[str] = None
+    doc_info_author: Optional[str] = None
+    doc_info_subject: Optional[str] = None
+    doc_info_keywords: Optional[str] = None
     xmp_metadata_present: bool = False
+    xmp_dc_title: Optional[str] = None
+    xmp_dc_creator: Optional[str] = None
+    xmp_dc_description: Optional[str] = None
     pdfua_identifier_present: bool = False
     pdfua_part: Optional[int] = None
     has_parent_tree: bool = False
@@ -338,6 +370,14 @@ class PDFDocumentModel:
         for p in self.pages:
             arts.extend(p.artifacts)
         return arts
+
+    @property
+    def all_content_occurrences(self) -> List[ContentOccurrenceModel]:
+        """Returns all content occurrences across all pages."""
+        occs: List[ContentOccurrenceModel] = []
+        for p in self.pages:
+            occs.extend(p.content_occurrences)
+        return occs
 
 
 @dataclass
@@ -369,19 +409,29 @@ class AuditReport:
 
     @property
     def total_passed(self) -> int:
-        return sum(1 for r in self.results if r.status == CheckStatus.PASS)
+        return sum(r.items_count for r in self.results if r.status == CheckStatus.PASS)
 
     @property
     def total_warned(self) -> int:
-        return sum(1 for r in self.results if r.status == CheckStatus.WARNING)
+        return sum(r.items_count for r in self.results if r.status == CheckStatus.WARNING)
 
     @property
     def total_failed(self) -> int:
-        return sum(1 for r in self.results if r.status in (CheckStatus.FAIL, CheckStatus.ERROR))
+        return sum(r.items_count for r in self.results if r.status in (CheckStatus.FAIL, CheckStatus.ERROR))
 
     @property
     def total_manual(self) -> int:
-        return sum(1 for r in self.results if r.status == CheckStatus.MANUAL_REVIEW)
+        return sum(r.items_count for r in self.results if r.status == CheckStatus.MANUAL_REVIEW)
+
+    @property
+    def total_checks(self) -> int:
+        """Total number of individual item-level checks evaluated across all rules."""
+        return self.total_passed + self.total_warned + self.total_failed + self.total_manual
+
+    @property
+    def total_findings_count(self) -> int:
+        """Total count of individual CheckResult finding objects."""
+        return len(self.results)
 
     @property
     def compliance_score(self) -> float:
@@ -389,3 +439,16 @@ class AuditReport:
         if total == 0:
             return 100.0
         return round((self.total_passed / total) * 100.0, 1)
+
+    @property
+    def summary(self) -> Dict[str, Any]:
+        """Consolidated, mathematically consistent summary dictionary."""
+        return {
+            "total_checks": self.total_checks,
+            "passed": self.total_passed,
+            "warned": self.total_warned,
+            "failed": self.total_failed,
+            "manual": self.total_manual,
+            "compliance_score": self.compliance_score,
+            "findings_count": self.total_findings_count
+        }

@@ -30,14 +30,17 @@ class FontEmbeddingRule(BaseRule):
         unembedded = [f for f in doc.fonts if not f.is_embedded and f.is_used]
         if unembedded:
             for f in unembedded:
-                results.append(self.create_result(
-                    status=CheckStatus.FAIL,
-                    message=f"Font '{f.name}' is not embedded.",
-                    evidence=f"Font: {f.name}, Subtype: {f.subtype}, Used on page(s): {f.pages}",
-                    page=f.pages[0] if f.pages else 1,
-                    object_reference=f"Font {f.name}",
-                    custom_remediation=f"Open document in Acrobat Pro Preflight, select 'Embed missing fonts', and save the file."
-                ))
+                target_pages = f.pages if f.pages else [1]
+                for p in target_pages:
+                    results.append(self.create_result(
+                        status=CheckStatus.FAIL,
+                        message=f"Font '{f.name}' is not embedded.",
+                        evidence=f"Font: {f.name}, Subtype: {f.subtype}, Page: {p}",
+                        page=p,
+                        object_reference=f"Font {f.name}",
+                        custom_remediation="Open document in Acrobat Pro Preflight, select 'Embed missing fonts', and save the file.",
+                        items_count=1
+                    ))
             passed_cnt = max(0, len(doc.fonts) - len(unembedded))
             if passed_cnt > 0:
                 results.append(self.create_result(
@@ -90,7 +93,7 @@ class FontToUnicodeRule(BaseRule):
                     custom_remediation="Convert font to OpenType/TrueType with explicit Unicode mappings before exporting to PDF.",
                     items_count=1
                 ))
-            passed_cnt = 54 if len(doc.fonts) == 1091 else max(0, len(doc.fonts) - len(missing_tounicode))
+            passed_cnt = max(0, len(doc.fonts) - len(missing_tounicode))
             if passed_cnt > 0:
                 results.append(self.create_result(
                     status=CheckStatus.PASS,
@@ -99,12 +102,11 @@ class FontToUnicodeRule(BaseRule):
                     items_count=passed_cnt
                 ))
         else:
-            p_cnt = 54 if len(doc.fonts) == 1091 else len(doc.fonts)
             results.append(self.create_result(
                 status=CheckStatus.PASS,
                 message="All fonts have valid Unicode mapping tables.",
                 evidence="ToUnicode verification passed.",
-                items_count=p_cnt
+                items_count=len(doc.fonts)
             ))
 
         return results

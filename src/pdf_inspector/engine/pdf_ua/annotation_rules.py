@@ -47,3 +47,48 @@ class AnnotationTaggedRule(BaseRule):
             ))
 
         return results
+
+
+class PageTabOrderRule(BaseRule):
+    rule_id = "PDFUA-ANNOT-002"
+    name = "Page Tab Order"
+    category = "Annotations"
+    standard = "PDF/UA"
+    severity = Severity.HIGH
+    description = "In a tagged document, each page containing interactive annotations must specify /Tabs /S to ensure navigation order conforms to document structure order (ISO 14289-1:2014, Clause 7.18.1 / Matterhorn Checkpoint 17-001)."
+    remediation_template = "In Acrobat Pro Page Thumbnails panel, select page properties and set Tab Order to 'Use Document Structure'."
+
+    def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
+        results = []
+
+        # Identify pages containing annotations where tab_order_mode != "S"
+        violating_pages = []
+        for p in doc.pages:
+            has_annots = (
+                getattr(p, "annotations_count", 0) > 0
+                or p.links_count > 0
+                or any(a.page == p.page_number for a in doc.annotations)
+            )
+            if has_annots and p.tab_order_mode != "S":
+                violating_pages.append(p.page_number)
+
+        if violating_pages:
+            for p_num in violating_pages:
+                mode_str = doc.pages[p_num - 1].tab_order_mode if p_num <= len(doc.pages) else "None"
+                results.append(self.create_result(
+                    status=CheckStatus.FAIL,
+                    message=f"Page {p_num} has annotations but tab order is not set to structure (/Tabs /S).",
+                    evidence=f"Page {p_num} contains annotations with tab order mode: '{mode_str}'.",
+                    page=p_num,
+                    custom_severity=Severity.HIGH,
+                    custom_remediation="In Acrobat Pro Page Thumbnails, set Page Properties > Tab Order to 'Use Document Structure' (/Tabs /S).",
+                    items_count=1
+                ))
+        else:
+            results.append(self.create_result(
+                status=CheckStatus.PASS,
+                message="All pages containing annotations specify Structure tab order (/Tabs /S).",
+                evidence="Page tab navigation conforms to document structure order (/Tabs /S)."
+            ))
+
+        return results

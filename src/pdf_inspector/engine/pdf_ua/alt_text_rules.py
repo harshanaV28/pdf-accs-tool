@@ -25,7 +25,6 @@ class FigureAlternativeTextRule(BaseRule):
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
         results = []
         if not doc.structure_tree:
-            # If not tagged at all, figure check returns warning
             return [self.create_result(
                 status=CheckStatus.WARNING,
                 message="Cannot verify figure alternate descriptions because document is untagged.",
@@ -70,7 +69,8 @@ class FigureAlternativeTextRule(BaseRule):
                     bounding_box=bbox,
                     object_reference=f"<{tag} id='{nid}'>",
                     custom_severity=Severity.HIGH,
-                    custom_remediation="Add an informative alternative description describing the visual content of the figure."
+                    custom_remediation="Add an informative alternative description describing the visual content of the figure.",
+                    items_count=1
                 ))
 
         if placeholder_alt:
@@ -83,7 +83,8 @@ class FigureAlternativeTextRule(BaseRule):
                     bounding_box=bbox,
                     object_reference=f"<{tag} id='{nid}'>",
                     custom_severity=Severity.MEDIUM,
-                    custom_remediation="Replace file names or generic placeholders with meaningful descriptive alt text."
+                    custom_remediation="Replace file names or generic placeholders with meaningful descriptive alt text.",
+                    items_count=1
                 ))
 
         if untagged_images:
@@ -96,25 +97,17 @@ class FigureAlternativeTextRule(BaseRule):
                     bounding_box=img.bbox,
                     object_reference=f"Image {img.id}",
                     custom_severity=Severity.HIGH,
-                    custom_remediation="Tag the image as a <Figure> with alt text, or mark it as an Artifact if purely decorative."
+                    custom_remediation="Tag the image as a <Figure> with alt text, or mark it as an Artifact if purely decorative.",
+                    items_count=1
                 ))
 
-        if not missing_alt and not placeholder_alt and not untagged_images:
-            passed_cnt = len(all_graphics) if all_graphics else len(doc.images)
+        passed_cnt = max(0, len(all_graphics) - len(missing_alt) - len(placeholder_alt))
+        if passed_cnt > 0:
             results.append(self.create_result(
                 status=CheckStatus.PASS,
-                message=f"All {passed_cnt} figure/formula element(s) have valid alternative descriptions.",
-                evidence="All graphical elements contain non-empty descriptive text.",
+                message=f"{passed_cnt} figure/formula element(s) have valid alternative descriptions.",
+                evidence=f"Passed figures with valid alt text: {passed_cnt}/{len(all_graphics)}",
                 items_count=passed_cnt
             ))
-        elif not missing_alt and not untagged_images and placeholder_alt:
-            passed_cnt = max(0, len(all_graphics) - len(placeholder_alt))
-            if passed_cnt > 0:
-                results.append(self.create_result(
-                    status=CheckStatus.PASS,
-                    message=f"{passed_cnt} figure/formula element(s) have valid alternative descriptions.",
-                    evidence=f"Passed figures: {passed_cnt}/{len(all_graphics)}",
-                    items_count=passed_cnt
-                ))
 
         return results

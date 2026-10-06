@@ -86,10 +86,10 @@ class DocumentParser:
                     except Exception:
                         doc_info[key] = ""
 
-            title = doc_info.get("Title")
-            author = doc_info.get("Author")
-            subject = doc_info.get("Subject")
-            keywords = doc_info.get("Keywords")
+            doc_info_title = doc_info.get("Title")
+            doc_info_author = doc_info.get("Author")
+            doc_info_subject = doc_info.get("Subject")
+            doc_info_keywords = doc_info.get("Keywords")
             creator = doc_info.get("Creator")
             producer = doc_info.get("Producer")
             creation_date = doc_info.get("CreationDate")
@@ -132,6 +132,9 @@ class DocumentParser:
 
             # XMP Metadata & PDF/UA Identification
             xmp_metadata_present = "/Metadata" in pike_doc.Root
+            xmp_dc_title = None
+            xmp_dc_creator = None
+            xmp_dc_description = None
             pdfua_identifier_present = False
             pdfua_part = None
 
@@ -140,20 +143,38 @@ class DocumentParser:
                     meta_bytes = bytes(pike_doc.Root.Metadata.read_bytes())
                     meta_str = meta_bytes.decode("utf-8", errors="ignore")
 
-                    if not title:
-                        m_title = re.search(r"<dc:title>.*?<rdf:li[^>]*>(.*?)</rdf:li>", meta_str, re.DOTALL | re.IGNORECASE)
-                        if m_title:
-                            title = m_title.group(1).strip()
+                    # Dublin Core Title (<dc:title>)
+                    m_title = re.search(r"<dc:title>.*?<rdf:li[^>]*>(.*?)</rdf:li>", meta_str, re.DOTALL | re.IGNORECASE)
+                    if m_title:
+                        xmp_dc_title = m_title.group(1).strip()
+                    else:
+                        m_title_direct = re.search(r"<dc:title>(.*?)</dc:title>", meta_str, re.DOTALL | re.IGNORECASE)
+                        if m_title_direct and "<rdf:li" not in m_title_direct.group(1):
+                            xmp_dc_title = m_title_direct.group(1).strip()
 
+                    # Dublin Core Creator
+                    m_creator = re.search(r"<dc:creator>.*?<rdf:li[^>]*>(.*?)</rdf:li>", meta_str, re.DOTALL | re.IGNORECASE)
+                    if m_creator:
+                        xmp_dc_creator = m_creator.group(1).strip()
+
+                    # Dublin Core Description
+                    m_desc = re.search(r"<dc:description>.*?<rdf:li[^>]*>(.*?)</rdf:li>", meta_str, re.DOTALL | re.IGNORECASE)
+                    if m_desc:
+                        xmp_dc_description = m_desc.group(1).strip()
+
+                    # PDF/UA Identification (pdfuaid:part)
                     m_part = re.search(r"<pdfuaid:part>(\d+)</pdfuaid:part>", meta_str, re.IGNORECASE)
                     if m_part:
                         pdfua_identifier_present = True
                         pdfua_part = int(m_part.group(1))
-                    elif "pdfua" in meta_str.lower() or "iso 14289" in meta_str.lower():
+                    elif "pdfuaid" in meta_str.lower() or "iso 14289" in meta_str.lower():
                         pdfua_identifier_present = True
                         pdfua_part = 1
                 except Exception as e:
                     logger.debug(f"Failed parsing XMP stream: {e}")
+
+            # Display title preference: prefer XMP dc:title, fallback to Info title for UI display
+            title = xmp_dc_title or doc_info_title
 
             # ParentTree & RoleMap
             has_parent_tree = False
@@ -184,11 +205,21 @@ class DocumentParser:
                     page_map[p.objgen[0]] = idx
                 page_map[id(p)] = idx
 
-            # 2. Extract Pages with MCIDs, artifact XObjects, and geometry
+            # 2. Extract Pages with MCIDs, content occurrences, artifacts, and geometry
             pages: List[PageModel] = []
             page_mcid_data: Dict[int, Dict[int, Tuple[str, Tuple[float, float, float, float]]]] = {}
             page_artifact_xobjs: Dict[int, Set[str]] = {}
             xobject_artifact_cache: Dict[int, Tuple[int, List[str]]] = {}
+
+            STREAM_TOKEN_RE = re.compile(
+                r'(?P<bdc>/(\w+)\s+(<<.*?>>|/\w+)\s*BDC)'
+                r'|(?P<bmc>/(\w+)\s+BMC)'
+                r'|(?P<emc>\bEMC\b)'
+                r'|(?P<do>/(\w+)\s+Do\b)'
+                r'|(?P<text_tj>(?:\((?:\\.|[^()\\])*\)|\[(?:\\.|[^\]\\])*\])\s*(?:TJ|Tj|\'|"))'
+                r'|(?P<paint>\b(?:sh|f\*|b\*|B\*|f|F|S|s|B|b)\b)',
+                re.DOTALL
+            )
 
             for page_idx, pike_page in enumerate(pike_doc.pages, start=1):
                 fitz_page = fitz_doc[page_idx - 1]
@@ -199,12 +230,17 @@ class DocumentParser:
                 # Check Tab order and StructParents on page dictionary
                 tab_mode = "Unspecified"
                 has_tab = False
+                annots_count = 0
                 struct_parents_id = None
                 mcids_found: List[int] = []
                 mcid_bboxes: Dict[int, Tuple[float, float, float, float]] = {}
                 mcid_texts: Dict[int, str] = {}
                 art_xobjs: Set[str] = set()
                 page_artifacts: List[ArtifactOccurrenceModel] = []
+                page_content_occs: List[ContentOccurrenceModel] = []
+                unmarked_count = 0
+                tagged_in_art_count = 0
+                art_in_tagged_count = 0
 
                 # Collect XObjects defined on this page
                 xobj_info: Dict[str, Dict[str, Any]] = {}
@@ -215,6 +251,12 @@ class DocumentParser:
                     logger.debug(f"Error checking page xobjects: {e}")
 
                 try:
+                    if "/Annots" in pike_page:
+                        try:
+                            annots_count = len(pike_page["/Annots"])
+                        except Exception:
+                            annots_count = 0
+
                     if "/Tabs" in pike_page:
                         has_tab = True
                         tab_mode = str(pike_page["/Tabs"]).strip("/")
@@ -222,7 +264,7 @@ class DocumentParser:
                     if "/StructParents" in pike_page:
                         struct_parents_id = int(pike_page["/StructParents"])
 
-                    # Parse MCIDs, Artifacts, and Artifact XObjects from page contents stream
+                    # Parse MCIDs, Artifacts, and marked content tokens from page contents stream
                     if "/Contents" in pike_page:
                         contents_obj = pike_page["/Contents"]
                         raw_stream = b""
@@ -242,21 +284,24 @@ class DocumentParser:
                         # Marked content stack tracking
                         stack: List[Dict[str, Any]] = []
 
-                        for m in CONTENT_TOKEN_PATTERN.finditer(stream_text):
-                            full = m.group(1)
-                            if "BDC" in full:
-                                tag = m.group(2)
-                                props = m.group(3)
+                        for m in STREAM_TOKEN_RE.finditer(stream_text):
+                            if m.group("bdc"):
+                                bdc_m = re.match(r"/(\w+)\s+(<<.*?>>|/\w+)\s*BDC", m.group("bdc"), re.DOTALL)
+                                tag = bdc_m.group(1) if bdc_m else "Span"
+                                props = bdc_m.group(2) if bdc_m else ""
                                 mcid = None
                                 if props.startswith("<<") and "/MCID" in props:
                                     mc_match = re.search(r"/MCID\s+(\d+)", props)
                                     if mc_match:
                                         mcid = int(mc_match.group(1))
 
-                                is_art = (tag.lower() == "artifact")
+                                is_art = (tag.lower() == "artifact" or "/artifact" in props.lower())
                                 in_tagged = any(s["mcid"] is not None for s in stack)
+                                in_art = any(s["is_artifact"] for s in stack)
+
                                 if is_art:
                                     if in_tagged:
+                                        art_in_tagged_count += 1
                                         ancestor = next(s for s in reversed(stack) if s["mcid"] is not None)
                                         page_artifacts.append(ArtifactOccurrenceModel(
                                             page_number=page_idx,
@@ -271,14 +316,30 @@ class DocumentParser:
                                             page_number=page_idx,
                                             is_inside_tagged=False
                                         ))
-                                stack.append({"tag": tag, "mcid": mcid})
+                                else:
+                                    if in_art:
+                                        tagged_in_art_count += 1
+                                        page_content_occs.append(ContentOccurrenceModel(
+                                            page_number=page_idx,
+                                            operator_type="marked_content",
+                                            operator_name="BDC",
+                                            mcid=mcid,
+                                            tag=tag,
+                                            is_inside_artifact=True
+                                        ))
 
-                            elif "BMC" in full:
-                                tag = m.group(4)
+                                stack.append({"tag": tag, "mcid": mcid, "is_artifact": is_art})
+
+                            elif m.group("bmc"):
+                                bmc_m = re.match(r"/(\w+)\s+BMC", m.group("bmc"))
+                                tag = bmc_m.group(1) if bmc_m else "Span"
                                 is_art = (tag.lower() == "artifact")
                                 in_tagged = any(s["mcid"] is not None for s in stack)
+                                in_art = any(s["is_artifact"] for s in stack)
+
                                 if is_art:
                                     if in_tagged:
+                                        art_in_tagged_count += 1
                                         ancestor = next(s for s in reversed(stack) if s["mcid"] is not None)
                                         page_artifacts.append(ArtifactOccurrenceModel(
                                             page_number=page_idx,
@@ -293,15 +354,51 @@ class DocumentParser:
                                             page_number=page_idx,
                                             is_inside_tagged=False
                                         ))
-                                stack.append({"tag": tag, "mcid": None})
+                                else:
+                                    if in_art:
+                                        tagged_in_art_count += 1
 
-                            elif full == "EMC":
+                                stack.append({"tag": tag, "mcid": None, "is_artifact": is_art})
+
+                            elif m.group("emc"):
                                 if stack:
                                     stack.pop()
 
-                            elif "Do" in full:
-                                xname = m.group(7)
+                            elif m.group("text_tj"):
+                                tj_txt = m.group("text_tj")
                                 in_tagged = any(s["mcid"] is not None for s in stack)
+                                in_art = any(s["is_artifact"] for s in stack)
+                                if not in_tagged and not in_art:
+                                    # Text operator executed outside of any marked content sequence
+                                    unmarked_count += 1
+                                    page_content_occs.append(ContentOccurrenceModel(
+                                        page_number=page_idx,
+                                        operator_type="text",
+                                        operator_name="Tj/TJ",
+                                        is_unmarked_real_content=True,
+                                        snippet=tj_txt[:60]
+                                    ))
+
+                            elif m.group("paint"):
+                                paint_op = m.group("paint")
+                                in_tagged = any(s["mcid"] is not None for s in stack)
+                                in_art = any(s["is_artifact"] for s in stack)
+                                if not in_tagged and not in_art:
+                                    # Path painting outside marked content
+                                    unmarked_count += 1
+                                    page_content_occs.append(ContentOccurrenceModel(
+                                        page_number=page_idx,
+                                        operator_type="path",
+                                        operator_name=paint_op,
+                                        is_unmarked_real_content=True
+                                    ))
+
+                            elif m.group("do"):
+                                do_m = re.match(r"/(\w+)\s+Do", m.group("do"))
+                                xname = do_m.group(1) if do_m else ""
+                                in_tagged = any(s["mcid"] is not None for s in stack)
+                                in_art = any(s["is_artifact"] for s in stack)
+
                                 if any(s["tag"].lower() == "artifact" for s in stack):
                                     art_xobjs.add(xname)
 
@@ -330,21 +427,11 @@ class DocumentParser:
 
                                     xo_arts_cnt, xo_snippets = xobject_artifact_cache[xref]
                                     if xo_arts_cnt > 0:
-                                        snippet_text = xo_snippets[0] if xo_snippets else ""
-                                        if not snippet_text:
-                                            try:
-                                                for b in fitz_page.get_text("blocks"):
-                                                    if "McGraw" in b[4] or "rights reserved" in b[4]:
-                                                        snippet_text = b[4].strip()
-                                                        break
-                                            except Exception:
-                                                pass
-                                        if not snippet_text:
-                                            snippet_text = f"Artifact inside Form XObject /{xname}"
-
+                                        snippet_text = xo_snippets[0] if xo_snippets else f"Artifact in Form XObject /{xname}"
                                         bbox_tuple = (float(xo_rect[0]), float(xo_rect[1]), float(xo_rect[2]), float(xo_rect[3])) if xo_rect else None
 
                                         if in_tagged:
+                                            art_in_tagged_count += xo_arts_cnt
                                             ancestor = next(s for s in reversed(stack) if s["mcid"] is not None)
                                             for _ in range(xo_arts_cnt):
                                                 page_artifacts.append(ArtifactOccurrenceModel(
@@ -367,6 +454,28 @@ class DocumentParser:
                                                     bbox=bbox_tuple,
                                                     text_snippet=snippet_text
                                                 ))
+                                    elif not in_tagged and not in_art:
+                                        # Form XObject containing real content executed outside marked content
+                                        unmarked_count += 1
+                                        page_content_occs.append(ContentOccurrenceModel(
+                                            page_number=page_idx,
+                                            operator_type="xobject",
+                                            operator_name="Do",
+                                            is_unmarked_real_content=True,
+                                            xobject_name=xname,
+                                            snippet=f"XObject /{xname} Do"
+                                        ))
+                                elif not in_tagged and not in_art:
+                                    # XObject Do outside marked content and not in xobj_info
+                                    unmarked_count += 1
+                                    page_content_occs.append(ContentOccurrenceModel(
+                                        page_number=page_idx,
+                                        operator_type="xobject",
+                                        operator_name="Do",
+                                        is_unmarked_real_content=True,
+                                        xobject_name=xname,
+                                        snippet=f"XObject /{xname} Do"
+                                    ))
 
                 except Exception as e:
                     logger.debug(f"Error checking page dictionary: {e}")
@@ -399,14 +508,19 @@ class DocumentParser:
                     text=text,
                     images_count=len(img_list),
                     links_count=len(links_list),
-                    has_structure=is_tagged,
+                    has_structure=is_tagged and (len(mcids_found) > 0 or len(page_artifacts) > 0),
                     has_tab_order=has_tab,
                     tab_order_mode=tab_mode,
                     struct_parents_id=struct_parents_id,
                     mcids=mcids_found,
                     mcid_bboxes=mcid_bboxes,
                     mcid_texts=mcid_texts,
-                    artifacts=page_artifacts
+                    artifacts=page_artifacts,
+                    content_occurrences=page_content_occs,
+                    unmarked_real_content_count=unmarked_count,
+                    tagged_in_artifact_count=tagged_in_art_count,
+                    artifact_in_tagged_count=art_in_tagged_count,
+                    annotations_count=annots_count
                 ))
 
             # 3. Structure Tree
@@ -450,9 +564,9 @@ class DocumentParser:
                 pdf_version=pdf_version,
                 page_count=page_count,
                 title=title,
-                author=author,
-                subject=subject,
-                keywords=keywords,
+                author=doc_info_author or xmp_dc_creator,
+                subject=doc_info_subject or xmp_dc_description,
+                keywords=doc_info_keywords,
                 creator=creator,
                 producer=producer,
                 creation_date=creation_date,
@@ -463,7 +577,14 @@ class DocumentParser:
                 allows_extraction=allows_extraction,
                 display_doc_title=display_doc_title,
                 has_suspects=has_suspects,
+                doc_info_title=doc_info_title,
+                doc_info_author=doc_info_author,
+                doc_info_subject=doc_info_subject,
+                doc_info_keywords=doc_info_keywords,
                 xmp_metadata_present=xmp_metadata_present,
+                xmp_dc_title=xmp_dc_title,
+                xmp_dc_creator=xmp_dc_creator,
+                xmp_dc_description=xmp_dc_description,
                 pdfua_identifier_present=pdfua_identifier_present,
                 pdfua_part=pdfua_part,
                 has_parent_tree=has_parent_tree,

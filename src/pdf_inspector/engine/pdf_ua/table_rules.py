@@ -11,10 +11,10 @@ from ...core.models import PDFDocumentModel, CheckResult, CheckStatus, Severity
 class TableStructureHeadersRule(BaseRule):
     rule_id = "PDFUA-TABLE-001"
     name = "Table Headers & Structure"
-    category = "Structure elements"
+    category = "Tables"
     standard = "PDF/UA"
     severity = Severity.HIGH
-    description = "Data tables must include header cells (<TH>) and maintain strict parent-child relationships (Table > TR > TH/TD)."
+    description = "Data tables must include header cells (<TH>) and maintain strict parent-child relationships (Table > TR > TH/TD) (ISO 14289-1, Clause 7.5 / Matterhorn 15-001)."
     remediation_template = "Identify column or row headers in Acrobat Pro Table Editor, set cell type to Header Cell, and define Scope."
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
@@ -27,9 +27,17 @@ class TableStructureHeadersRule(BaseRule):
                 items_count=0
             )]
 
-        tables_without_th = [t for t in doc.tables if not t.has_headers]
-        if tables_without_th:
-            for t in tables_without_th[:5]:
+        for t in doc.tables:
+            if t.has_headers:
+                results.append(self.create_result(
+                    status=CheckStatus.PASS,
+                    message=f"Table on page {t.page} has {t.header_cells_count} header cell(s) (<TH>).",
+                    evidence=f"Table {t.id} on page {t.page}: {t.rows_count} rows, {t.cols_count} cols, {t.header_cells_count} TH cells",
+                    page=t.page,
+                    object_reference=f"Table {t.id}",
+                    items_count=1
+                ))
+            else:
                 results.append(self.create_result(
                     status=CheckStatus.FAIL,
                     message=f"Table on page {t.page} has no designated header cells (<TH>).",
@@ -37,13 +45,8 @@ class TableStructureHeadersRule(BaseRule):
                     page=t.page,
                     object_reference=f"Table {t.id}",
                     custom_severity=Severity.HIGH,
-                    custom_remediation="Tag the first row or column as Header Cells (<TH>) in Acrobat Table Editor."
+                    custom_remediation="Tag the first row or column as Header Cells (<TH>) in Acrobat Table Editor.",
+                    items_count=1
                 ))
-        else:
-            results.append(self.create_result(
-                status=CheckStatus.PASS,
-                message=f"All {len(doc.tables)} table(s) contain designated header cells (<TH>).",
-                evidence=f"Tables validated: {len(doc.tables)}"
-            ))
 
         return results

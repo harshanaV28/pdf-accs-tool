@@ -81,12 +81,26 @@ def generate_samples(output_dir: str):
             "/Type": pikepdf.Name("/StructElem"),
             "/S": pikepdf.Name("/H1"),
             "/T": pikepdf.String("Annual Accessibility and Technology Report 2026"),
-            "/Pg": pdoc.pages[0].objgen
+            "/Pg": pdoc.pages[0].objgen,
+            "/K": pikepdf.Integer(0)
         })
         doc_elem["/K"] = pikepdf.Array([h1_elem])
 
+        # Wrap page content stream with marked content sequence for MCID 0
+        if "/Contents" in pdoc.pages[0]:
+            contents_obj = pdoc.pages[0]["/Contents"]
+            raw_stream = b""
+            if isinstance(contents_obj, pikepdf.Array):
+                for stream_part in contents_obj:
+                    if hasattr(stream_part, "read_bytes"):
+                        raw_stream += stream_part.read_bytes() + b"\n"
+            elif hasattr(contents_obj, "read_bytes"):
+                raw_stream = contents_obj.read_bytes()
+            tagged_stream = b"/H1 << /MCID 0 >> BDC\n" + raw_stream + b"\nEMC\n"
+            pdoc.pages[0]["/Contents"] = pdoc.make_stream(tagged_stream)
+
         parent_tree = pikepdf.Dictionary({
-            "/Nums": pikepdf.Array([pikepdf.Integer(0), pikepdf.Array([doc_elem, h1_elem])])
+            "/Nums": pikepdf.Array([pikepdf.Integer(0), pikepdf.Array([h1_elem])])
         })
 
         struct_root = pikepdf.Dictionary({
