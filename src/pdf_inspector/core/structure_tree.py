@@ -242,17 +242,25 @@ class StructureTreeParser:
                     k_str = str(k).strip("/")
                     if k_str.lower() == "bbox":
                         if isinstance(v, (pikepdf.Array, list, tuple)):
-                            try:
-                                parsed_bbox = [float(x) for x in v]
-                                attrs[k_str] = parsed_bbox
-                                if len(parsed_bbox) == 4:
-                                    struct_bbox = (parsed_bbox[0], parsed_bbox[1], parsed_bbox[2], parsed_bbox[3])
+                            if len(v) == 0:
+                                # Empty array represents unspecified BBox; do not record as explicit/malformed
+                                pass
+                            else:
+                                try:
+                                    import math
+                                    parsed_bbox = [float(x) for x in v]
+                                    attrs[k_str] = parsed_bbox
+                                    if len(parsed_bbox) == 4 and all(math.isfinite(x) for x in parsed_bbox):
+                                        struct_bbox = (parsed_bbox[0], parsed_bbox[1], parsed_bbox[2], parsed_bbox[3])
+                                        has_explicit_bbox = True
+                                    else:
+                                        has_explicit_bbox = True
+                                except Exception:
+                                    attrs[k_str] = [str(x) for x in v]
                                     has_explicit_bbox = True
-                            except Exception:
-                                attrs[k_str] = [str(x) for x in v]
-                                has_explicit_bbox = True
                         else:
                             attrs[k_str] = str(v)
+                            has_explicit_bbox = True
                     else:
                         attrs[k_str] = str(v)
                         if k_str.lower() == "placement":

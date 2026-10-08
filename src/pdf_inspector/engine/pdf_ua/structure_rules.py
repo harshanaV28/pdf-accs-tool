@@ -543,7 +543,12 @@ class FigureBoundingBoxRule(BaseRule):
                         raw_bbox = v
                         break
 
-            if raw_bbox is not None:
+            has_non_empty_raw_bbox = (
+                raw_bbox is not None
+                and not (isinstance(raw_bbox, (list, tuple, str, dict)) and len(raw_bbox) == 0)
+            )
+
+            if has_non_empty_raw_bbox:
                 if not _is_valid_4_number_bbox(raw_bbox):
                     failing_figures.append((
                         fig,

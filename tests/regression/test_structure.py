@@ -278,3 +278,39 @@ class TestStructureRegression:
         )
         res_single = rule.evaluate(doc_single)
         assert any(r.status == CheckStatus.PASS for r in res_single)
+
+        # Case 5: Single-page figure with empty /BBox [] (unspecified layout attribute, valid under PDF/UA-1)
+        fig_empty_bbox = StructureNode(
+            "fig_empty", "Figure", "Figure", page=1, has_explicit_bbox=False,
+            attributes={"BBox": [], "O": "/Layout", "Placement": "/Block"}
+        )
+        root_empty_bbox = StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[fig_empty_bbox])
+        doc_empty_bbox = PDFDocumentModel(
+            filepath="", filename="empty_bbox_fig.pdf", filesize=100, pdf_version="1.7",
+            page_count=1, is_tagged=True, structure_tree=root_empty_bbox
+        )
+        res_empty = rule.evaluate(doc_empty_bbox)
+        assert any(r.status == CheckStatus.PASS for r in res_empty)
+
+        # Case 6: Single-page figure with non-numeric malformed BBox (Matterhorn 16-001)
+        fig_non_num = StructureNode(
+            "fig_non_num", "Figure", "Figure", page=1, has_explicit_bbox=True,
+            attributes={"BBox": ["a", "b", "c", "d"]}
+        )
+        root_non_num = StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[fig_non_num])
+        doc_non_num = PDFDocumentModel(
+            filepath="", filename="non_num_bbox.pdf", filesize=100, pdf_version="1.7",
+            page_count=1, is_tagged=True, structure_tree=root_non_num
+        )
+        res_non_num = rule.evaluate(doc_non_num)
+        assert any(r.status == CheckStatus.FAIL and "invalid" in r.message.lower() for r in res_non_num)
+
+        # Case 7: Real PDF12.pdf integration test (verifies 0 false positive BBox failures)
+        import os
+        from src.pdf_inspector.core.document_parser import DocumentParser
+        pdf12_path = os.path.join("test_corpus", "ALL FILES", "PDF12.pdf")
+        if os.path.exists(pdf12_path):
+            doc12 = DocumentParser(pdf12_path).parse()
+            res12 = rule.evaluate(doc12)
+            assert not any(r.status == CheckStatus.FAIL for r in res12)
+            assert any(r.status == CheckStatus.PASS for r in res12)

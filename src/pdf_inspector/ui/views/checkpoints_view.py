@@ -225,6 +225,11 @@ class CheckpointsView(QWidget):
         self.lbl_val_title = QLabel("-")
         self.lbl_val_title.setStyleSheet("color: #1e3a8a; font-weight: bold; font-size: 13px; background-color: #dbeafe; padding: 2px 6px; border-radius: 3px;")
 
+        lbl_t_author = QLabel("Author")
+        lbl_t_author.setStyleSheet("color: #64748b; font-size: 12px;")
+        self.lbl_val_author = QLabel("-")
+        self.lbl_val_author.setStyleSheet("color: #0f172a; font-size: 13px;")
+
         lbl_t_fn = QLabel("Filename")
         lbl_t_fn.setStyleSheet("color: #64748b; font-size: 12px;")
         self.lbl_val_fn = QLabel("-")
@@ -252,16 +257,18 @@ class CheckpointsView(QWidget):
 
         meta_grid.addWidget(lbl_t_title, 0, 0)
         meta_grid.addWidget(self.lbl_val_title, 0, 1)
-        meta_grid.addWidget(lbl_t_fn, 1, 0)
-        meta_grid.addWidget(self.lbl_val_fn, 1, 1)
-        meta_grid.addWidget(lbl_t_lang, 2, 0)
-        meta_grid.addWidget(self.lbl_val_lang, 2, 1)
-        meta_grid.addWidget(lbl_t_pages, 3, 0)
-        meta_grid.addWidget(self.lbl_val_pages, 3, 1)
-        meta_grid.addWidget(lbl_t_tags, 4, 0)
-        meta_grid.addWidget(self.lbl_val_tags, 4, 1)
-        meta_grid.addWidget(lbl_t_size, 5, 0)
-        meta_grid.addWidget(self.lbl_val_size, 5, 1)
+        meta_grid.addWidget(lbl_t_author, 1, 0)
+        meta_grid.addWidget(self.lbl_val_author, 1, 1)
+        meta_grid.addWidget(lbl_t_fn, 2, 0)
+        meta_grid.addWidget(self.lbl_val_fn, 2, 1)
+        meta_grid.addWidget(lbl_t_lang, 3, 0)
+        meta_grid.addWidget(self.lbl_val_lang, 3, 1)
+        meta_grid.addWidget(lbl_t_pages, 4, 0)
+        meta_grid.addWidget(self.lbl_val_pages, 4, 1)
+        meta_grid.addWidget(lbl_t_tags, 5, 0)
+        meta_grid.addWidget(self.lbl_val_tags, 5, 1)
+        meta_grid.addWidget(lbl_t_size, 6, 0)
+        meta_grid.addWidget(self.lbl_val_size, 6, 1)
 
         h_layout.addLayout(meta_grid)
         h_layout.addStretch()
@@ -397,7 +404,8 @@ class CheckpointsView(QWidget):
 
         # Update metadata card if doc model provided
         if doc is not None:
-            self.lbl_val_title.setText(doc.title if doc.title else doc.filename)
+            self.lbl_val_title.setText(doc.title.strip() if doc.title and doc.title.strip() else "No title")
+            self.lbl_val_author.setText(doc.author.strip() if doc.author and doc.author.strip() else "No author")
             self.lbl_val_fn.setText(doc.filename)
             self.lbl_val_lang.setText(doc.language if doc.language else "-")
             self.lbl_val_pages.setText(str(doc.page_count))

@@ -144,23 +144,34 @@ class DocumentParser:
                     meta_str = meta_bytes.decode("utf-8", errors="ignore")
 
                     # Dublin Core Title (<dc:title>)
-                    m_title = re.search(r"<dc:title>.*?<rdf:li[^>]*>(.*?)</rdf:li>", meta_str, re.DOTALL | re.IGNORECASE)
-                    if m_title:
-                        xmp_dc_title = m_title.group(1).strip()
-                    else:
-                        m_title_direct = re.search(r"<dc:title>(.*?)</dc:title>", meta_str, re.DOTALL | re.IGNORECASE)
-                        if m_title_direct and "<rdf:li" not in m_title_direct.group(1):
-                            xmp_dc_title = m_title_direct.group(1).strip()
+                    m_title_block = re.search(r"<dc:title\b[^>]*>(.*?)</dc:title>", meta_str, re.DOTALL | re.IGNORECASE)
+                    if m_title_block:
+                        block = m_title_block.group(1)
+                        m_li = re.search(r"<rdf:li\b[^>]*>(.*?)</rdf:li>", block, re.DOTALL | re.IGNORECASE)
+                        if m_li and m_li.group(1).strip():
+                            xmp_dc_title = m_li.group(1).strip()
+                        elif "<rdf:" not in block and block.strip():
+                            xmp_dc_title = block.strip()
 
-                    # Dublin Core Creator
-                    m_creator = re.search(r"<dc:creator>.*?<rdf:li[^>]*>(.*?)</rdf:li>", meta_str, re.DOTALL | re.IGNORECASE)
-                    if m_creator:
-                        xmp_dc_creator = m_creator.group(1).strip()
+                    # Dublin Core Creator (<dc:creator>)
+                    m_creator_block = re.search(r"<dc:creator\b[^>]*>(.*?)</dc:creator>", meta_str, re.DOTALL | re.IGNORECASE)
+                    if m_creator_block:
+                        block = m_creator_block.group(1)
+                        m_li = re.search(r"<rdf:li\b[^>]*>(.*?)</rdf:li>", block, re.DOTALL | re.IGNORECASE)
+                        if m_li and m_li.group(1).strip():
+                            xmp_dc_creator = m_li.group(1).strip()
+                        elif "<rdf:" not in block and block.strip():
+                            xmp_dc_creator = block.strip()
 
-                    # Dublin Core Description
-                    m_desc = re.search(r"<dc:description>.*?<rdf:li[^>]*>(.*?)</rdf:li>", meta_str, re.DOTALL | re.IGNORECASE)
-                    if m_desc:
-                        xmp_dc_description = m_desc.group(1).strip()
+                    # Dublin Core Description (<dc:description>)
+                    m_desc_block = re.search(r"<dc:description\b[^>]*>(.*?)</dc:description>", meta_str, re.DOTALL | re.IGNORECASE)
+                    if m_desc_block:
+                        block = m_desc_block.group(1)
+                        m_li = re.search(r"<rdf:li\b[^>]*>(.*?)</rdf:li>", block, re.DOTALL | re.IGNORECASE)
+                        if m_li and m_li.group(1).strip():
+                            xmp_dc_description = m_li.group(1).strip()
+                        elif "<rdf:" not in block and block.strip():
+                            xmp_dc_description = block.strip()
 
                     # PDF/UA Identification (pdfuaid:part)
                     m_part = re.search(r"<pdfuaid:part>(\d+)</pdfuaid:part>", meta_str, re.IGNORECASE)
