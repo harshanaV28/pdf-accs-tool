@@ -1,7 +1,7 @@
 """
-Tests for Phase 9A Quality Checkpoints Aggregation & Presentation Layer.
-Verifies that existing engine findings (PDF/UA, WCAG, Quality, AI) are correctly
-mapped and presented in the Quality tab without duplicate engine rules or normative status mutation.
+Tests for Quality Checkpoints Aggregation & Presentation Layer.
+Verifies that existing and newly implemented engine findings
+are correctly mapped and presented in the Quality tab without duplicate engine rules.
 """
 
 import pytest
@@ -20,18 +20,27 @@ def qapp():
 
 
 def test_quality_category_rule_mappings_coverage():
-    """Verify all defined Quality categories map to registered engine rule IDs."""
+    """Verify all 16 defined Quality checkpoints map to registered engine rule IDs."""
     expected_categories = [
-        "Document Quality",
-        "Heading Structure",
-        "Content Quality",
-        "Alternative Text Quality",
-        "Link & Navigation Quality",
-        "List Quality",
-        "Table Quality",
-        "Structure & Note Quality"
+        "Validity of document title",
+        "Artifacted content on page body",
+        "Tagged text consists of only whitespace",
+        "Tagged content exists outside the page boundaries",
+        "Presence of headings",
+        "Presence of bookmarks",
+        '"TOCI" elements contain "Link" elements',
+        '"TOCI" elements correctly linked to headings',
+        "Validity of alternative texts",
+        "Alternative text on text elements",
+        'Completeness of "Link" elements',
+        'Formal correctness of "LI" elements',
+        'Completeness of "Table" elements',
+        '"Note" elements are referenced',
+        '"Note" elements contain "Lbl" elements',
+        '"P" elements contain "Note" elements',
     ]
     assert CheckpointsView.QUALITY_CATEGORIES == expected_categories
+    assert len(CheckpointsView.QUALITY_CATEGORIES) == 16
 
     for cat in expected_categories:
         assert cat in CheckpointsView.QUALITY_RULE_MAPPINGS
@@ -40,7 +49,7 @@ def test_quality_category_rule_mappings_coverage():
 
 
 def test_quality_checkpoints_view_aggregation(qapp):
-    """Verify Quality matrix accurately counts findings mapped from existing engine checks."""
+    """Verify Quality matrix accurately counts findings mapped from existing and new engine checks."""
     doc = PDFDocumentModel(
         filepath="/test/sample.pdf",
         filename="sample.pdf",
@@ -52,7 +61,7 @@ def test_quality_checkpoints_view_aggregation(qapp):
     )
 
     results = [
-        # Document Quality
+        # Validity of document title
         CheckResult(
             check_id="PDFUA-META-002",
             name="XMP Document Title",
@@ -71,7 +80,7 @@ def test_quality_checkpoints_view_aggregation(qapp):
             severity=Severity.HIGH,
             message="DisplayDocTitle is false"
         ),
-        # Heading Structure
+        # Presence of headings
         CheckResult(
             check_id="QUAL-HEAD-001",
             name="Heading Hierarchy Integrity",
@@ -81,7 +90,7 @@ def test_quality_checkpoints_view_aggregation(qapp):
             severity=Severity.MEDIUM,
             message="Skipped heading level"
         ),
-        # Link Quality
+        # Completeness of "Link" elements
         CheckResult(
             check_id="QUAL-LINK-001",
             name="Meaningful Link Labels",
@@ -91,7 +100,7 @@ def test_quality_checkpoints_view_aggregation(qapp):
             severity=Severity.LOW,
             message="All links meaningful"
         ),
-        # Table Quality
+        # Completeness of "Table" elements
         CheckResult(
             check_id="QUAL-TABLE-001",
             name="Table Regularity & Symmetry",
@@ -101,6 +110,16 @@ def test_quality_checkpoints_view_aggregation(qapp):
             severity=Severity.LOW,
             message="Tables regular"
         ),
+        # Tagged content exists outside the page boundaries
+        CheckResult(
+            check_id="QUAL-BOUND-001",
+            name="Tagged Content Page Boundaries",
+            category="Content Quality",
+            standard="Quality",
+            status=CheckStatus.PASS,
+            severity=Severity.HIGH,
+            message="All content in bounds"
+        ),
     ]
 
     report = AuditReport(document_info={"filename": doc.filename}, results=results)
@@ -108,29 +127,45 @@ def test_quality_checkpoints_view_aggregation(qapp):
     view = CheckpointsView()
     view.update_report(report, doc)
 
-    # Document Quality row (index 0): 1 passed (META-002), 1 failed (SETTINGS-001)
-    item_doc_q_name = view.table_quality.item(0, 0).text()
-    item_doc_q_pass = view.table_quality.item(0, 1).text()
-    item_doc_q_warn = view.table_quality.item(0, 2).text()
-    item_doc_q_fail = view.table_quality.item(0, 3).text()
-    assert "❌" in item_doc_q_name
-    assert item_doc_q_pass == "1"
-    assert item_doc_q_warn == "-"
-    assert item_doc_q_fail == "1"
+    # 1. Validity of document title (row 0): 1 passed (META-002)
+    item_title_name = view.table_quality.item(0, 0).text()
+    item_title_pass = view.table_quality.item(0, 1).text()
+    item_title_warn = view.table_quality.item(0, 2).text()
+    item_title_fail = view.table_quality.item(0, 3).text()
+    assert "✅" in item_title_name
+    assert item_title_pass == "1"
+    assert item_title_warn == "-"
+    assert item_title_fail == "-"
 
-    # Heading Structure row (index 1): 1 warned (QUAL-HEAD-001)
-    item_head_q_name = view.table_quality.item(1, 0).text()
-    item_head_q_pass = view.table_quality.item(1, 1).text()
-    item_head_q_warn = view.table_quality.item(1, 2).text()
-    item_head_q_fail = view.table_quality.item(1, 3).text()
-    assert "⚠️" in item_head_q_name
-    assert item_head_q_pass == "-"
-    assert item_head_q_warn == "1"
-    assert item_head_q_fail == "-"
+    # 4. Tagged content exists outside the page boundaries (row 3): 1 passed
+    item_bound_name = view.table_quality.item(3, 0).text()
+    item_bound_pass = view.table_quality.item(3, 1).text()
+    assert "✅" in item_bound_name
+    assert item_bound_pass == "1"
+
+    # 5. Presence of headings (row 4): 1 warned (QUAL-HEAD-001)
+    item_head_name = view.table_quality.item(4, 0).text()
+    item_head_pass = view.table_quality.item(4, 1).text()
+    item_head_warn = view.table_quality.item(4, 2).text()
+    item_head_fail = view.table_quality.item(4, 3).text()
+    assert "⚠️" in item_head_name
+    assert item_head_pass == "-"
+    assert item_head_warn == "1"
+    assert item_head_fail == "-"
+
+    # Unpopulated checkpoint shows '-' and '⊘' (e.g. row 6: TOCI elements contain Link elements)
+    item_toci_name = view.table_quality.item(6, 0).text()
+    item_toci_pass = view.table_quality.item(6, 1).text()
+    item_toci_warn = view.table_quality.item(6, 2).text()
+    item_toci_fail = view.table_quality.item(6, 3).text()
+    assert "⊘" in item_toci_name
+    assert item_toci_pass == "-"
+    assert item_toci_warn == "-"
+    assert item_toci_fail == "-"
 
 
 def test_detailed_results_filter_by_rule_ids(qapp):
-    """Verify DetailedResultsView can filter directly by rule IDs when navigating from Quality category."""
+    """Verify DetailedResultsView can filter directly by rule IDs when navigating from Quality checkpoint."""
     results = [
         CheckResult(
             check_id="PDFUA-META-002",
@@ -165,9 +200,9 @@ def test_detailed_results_filter_by_rule_ids(qapp):
     view.set_findings(results)
     assert len(view.filtered_findings) == 3
 
-    # Filter by Document Quality mapped rule IDs
-    doc_q_rules = CheckpointsView.QUALITY_RULE_MAPPINGS["Document Quality"]
-    view.filter_by_rule_ids(doc_q_rules, standard="All Standards", category_label="Document Quality")
+    # Filter by "Validity of document title" mapped rule IDs
+    title_rules = CheckpointsView.QUALITY_RULE_MAPPINGS["Validity of document title"]
+    view.filter_by_rule_ids(title_rules, standard="All Standards", category_label="Validity of document title")
 
     assert len(view.filtered_findings) == 1
     assert view.filtered_findings[0].check_id == "PDFUA-META-002"

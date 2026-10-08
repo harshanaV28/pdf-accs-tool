@@ -176,14 +176,22 @@ class CheckpointsView(QWidget):
     ]
 
     QUALITY_RULE_MAPPINGS = {
-        "Document Quality": ["PDFUA-META-002", "PDFUA-SETTINGS-001", "PDFUA-SETTINGS-003", "AI-OUTLINE-001", "WCAG-2.4"],
-        "Heading Structure": ["QUAL-HEAD-001"],
-        "Content Quality": ["PDFUA-CONTENT-004", "PDFUA-ARTIFACT-001", "PDFUA-ART-003", "PDFUA-STRUCT-002"],
-        "Alternative Text Quality": ["PDFUA-ALT-001", "AI-ALT-001", "WCAG-1.1.1"],
-        "Link & Navigation Quality": ["QUAL-LINK-001", "PDFUA-ANNOT-001"],
-        "List Quality": ["PDFUA-LIST-001"],
-        "Table Quality": ["QUAL-TABLE-001", "PDFUA-TABLE-001"],
-        "Structure & Note Quality": ["QUAL-STRUCT-001", "PDFUA-STRUCT-001"],
+        "Validity of document title": ["PDFUA-META-002"],
+        "Artifacted content on page body": ["PDFUA-ART-003", "PDFUA-ARTIFACT-001", "PDFUA-CONTENT-004"],
+        "Tagged text consists of only whitespace": ["PDFUA-STRUCT-002"],
+        "Tagged content exists outside the page boundaries": ["QUAL-BOUND-001"],
+        "Presence of headings": ["QUAL-HEAD-001"],
+        "Presence of bookmarks": ["PDFUA-SETTINGS-003"],
+        '"TOCI" elements contain "Link" elements': ["QUAL-TOC-001"],
+        '"TOCI" elements correctly linked to headings': ["QUAL-TOC-002"],
+        "Validity of alternative texts": ["PDFUA-ALT-001", "AI-ALT-001"],
+        "Alternative text on text elements": ["QUAL-TEXT-001"],
+        'Completeness of "Link" elements': ["PDFUA-ANNOT-001", "QUAL-LINK-001"],
+        'Formal correctness of "LI" elements': ["PDFUA-LIST-001"],
+        'Completeness of "Table" elements': ["PDFUA-TABLE-001", "QUAL-TABLE-001"],
+        '"Note" elements are referenced': ["QUAL-NOTE-001"],
+        '"Note" elements contain "Lbl" elements': ["QUAL-NOTE-002"],
+        '"P" elements contain "Note" elements': ["QUAL-NOTE-003"],
     }
 
     QUALITY_CATEGORIES = list(QUALITY_RULE_MAPPINGS.keys())

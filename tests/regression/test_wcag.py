@@ -65,10 +65,11 @@ class TestWCAGRegression:
     def test_wcag_compatible_rule(self):
         rule = WCAGCompatibleRule()
 
-        # Case 1: Untagged document -> FAIL
+        # Case 1: Untagged document with interactive controls -> FAIL
+        link_bad = LinkModel(id="l1", page=1, text="Click", uri="https://example.com")
         doc_untagged = PDFDocumentModel(
             filepath="", filename="untagged.pdf", filesize=100, pdf_version="1.7",
-            page_count=1, is_tagged=False, structure_tree=None
+            page_count=1, is_tagged=False, structure_tree=None, links=[link_bad]
         )
         res_untagged = rule.evaluate(doc_untagged)
         assert any(r.status == CheckStatus.FAIL and "untagged" in r.message.lower() for r in res_untagged)
@@ -109,13 +110,14 @@ class TestWCAGRegression:
         res_incompat = rule.evaluate(doc_incompat)
         assert any(r.status == CheckStatus.WARNING and "semantically incompatible" in r.message.lower() for r in res_incompat)
 
-        # Case 5: Fully compliant document
+        # Case 5: Document with accessible link -> PASS
         root_ok = StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[
             StructureNode("p1", "P", "P", page=1)
         ])
+        link_ok = LinkModel(id="l1", page=1, text="Home Page", uri="https://example.com")
         doc_ok = PDFDocumentModel(
             filepath="", filename="ok.pdf", filesize=100, pdf_version="1.7",
-            page_count=1, is_tagged=True, structure_tree=root_ok, allows_extraction=True
+            page_count=1, is_tagged=True, structure_tree=root_ok, links=[link_ok]
         )
         res_ok = rule.evaluate(doc_ok)
         assert any(r.status == CheckStatus.PASS for r in res_ok)
