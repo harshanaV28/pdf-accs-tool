@@ -175,11 +175,18 @@ class CheckpointsView(QWidget):
         "4.1 Compatible",
     ]
 
-    QUALITY_CATEGORIES = [
-        "Heading Structure",
-        "Table Quality",
-        "Link Quality",
-    ]
+    QUALITY_RULE_MAPPINGS = {
+        "Document Quality": ["PDFUA-META-002", "PDFUA-SETTINGS-001", "PDFUA-SETTINGS-003", "AI-OUTLINE-001", "WCAG-2.4"],
+        "Heading Structure": ["QUAL-HEAD-001"],
+        "Content Quality": ["PDFUA-CONTENT-004", "PDFUA-ARTIFACT-001", "PDFUA-ART-003", "PDFUA-STRUCT-002"],
+        "Alternative Text Quality": ["PDFUA-ALT-001", "AI-ALT-001", "WCAG-1.1.1"],
+        "Link & Navigation Quality": ["QUAL-LINK-001", "PDFUA-ANNOT-001"],
+        "List Quality": ["PDFUA-LIST-001"],
+        "Table Quality": ["QUAL-TABLE-001", "PDFUA-TABLE-001"],
+        "Structure & Note Quality": ["QUAL-STRUCT-001", "PDFUA-STRUCT-001"],
+    }
+
+    QUALITY_CATEGORIES = list(QUALITY_RULE_MAPPINGS.keys())
 
     AI_CATEGORIES = [
         "AI Alt-Text Evaluation",
@@ -370,7 +377,16 @@ class CheckpointsView(QWidget):
         """Updates all tables, status banners, tab icons, and document metadata summary."""
         pdfua_counts = report.get_category_counts("PDF/UA")
         wcag_counts = report.get_category_counts("WCAG")
-        quality_counts = report.get_category_counts("Quality")
+        # Quality counts computed via aggregated findings mapping
+        quality_counts: Dict[str, Dict[str, int]] = {}
+        for cat, rule_ids in self.QUALITY_RULE_MAPPINGS.items():
+            cat_results = [r for r in report.results if r.check_id in rule_ids]
+            p = sum(r.items_count for r in cat_results if r.status == CheckStatus.PASS)
+            w = sum(r.items_count for r in cat_results if r.status == CheckStatus.WARNING)
+            f = sum(r.items_count for r in cat_results if r.status in (CheckStatus.FAIL, CheckStatus.ERROR))
+            m = sum(r.items_count for r in cat_results if r.status == CheckStatus.MANUAL_REVIEW)
+            quality_counts[cat] = {"passed": p, "warned": w, "failed": f, "manual": m}
+
         ai_counts = report.get_category_counts("AI")
 
         self.table_pdf_ua.update_counts(pdfua_counts)
