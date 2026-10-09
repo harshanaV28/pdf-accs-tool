@@ -7,7 +7,7 @@ empty elements, and figure bounding boxes according to the Matterhorn Protocol.
 from typing import List, Optional, Tuple, Dict, Any, Set
 import re
 from ..rule_base import BaseRule
-from ...core.models import PDFDocumentModel, CheckResult, CheckStatus, Severity, StructureNode
+from ...core.models import PDFDocumentModel, CheckResult, CheckStatus, Severity, StructureNode, validate_bbox_coordinates
 from ...core.structure_tree import (
     STANDARD_STRUCTURE_TYPES_EXACT,
     GROUPING_ROLES,
@@ -521,18 +521,6 @@ class FigureBoundingBoxRule(BaseRule):
         if not figures:
             return results
 
-        def _is_valid_4_number_bbox(val: Any) -> bool:
-            if val is None or isinstance(val, (str, bytes, dict)):
-                return False
-            try:
-                if len(val) == 4:
-                    import math
-                    numeric_vals = [float(x) for x in val]
-                    return all(math.isfinite(x) for x in numeric_vals)
-            except Exception:
-                return False
-            return False
-
         failing_figures = []
         for fig in figures:
             # 1. Matterhorn 16-001: If BBox attribute is present, verify it is a valid 4-number array
@@ -549,7 +537,8 @@ class FigureBoundingBoxRule(BaseRule):
             )
 
             if has_non_empty_raw_bbox:
-                if not _is_valid_4_number_bbox(raw_bbox):
+                is_valid, _ = validate_bbox_coordinates(raw_bbox)
+                if not is_valid:
                     failing_figures.append((
                         fig,
                         "Figure element contains an invalid /BBox attribute (must be an array of four numbers) (Matterhorn 16-001).",
@@ -569,13 +558,17 @@ class FigureBoundingBoxRule(BaseRule):
 
             if len(pages_spanned) > 1:
                 pages_with_bbox = set()
-                if _is_valid_4_number_bbox(raw_bbox) or _is_valid_4_number_bbox(fig.struct_bbox):
+                is_raw_valid, _ = validate_bbox_coordinates(raw_bbox)
+                is_struct_valid, _ = validate_bbox_coordinates(fig.struct_bbox)
+                if is_raw_valid or is_struct_valid:
                     if fig.page:
                         pages_with_bbox.add(fig.page)
 
                 for c in fig.children:
                     c_bbox = c.attributes.get("BBox") if c.attributes else None
-                    if _is_valid_4_number_bbox(c_bbox) or _is_valid_4_number_bbox(c.struct_bbox):
+                    is_c_raw_valid, _ = validate_bbox_coordinates(c_bbox)
+                    is_c_struct_valid, _ = validate_bbox_coordinates(c.struct_bbox)
+                    if is_c_raw_valid or is_c_struct_valid:
                         if c.page:
                             pages_with_bbox.add(c.page)
                         elif c.pages_spanned:

@@ -20,36 +20,42 @@ class PDFSyntaxBasicRule(BaseRule):
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
         results = []
 
-        # 1. Version check
+        # 1. Header & Version Syntax Validation (ISO 32000-1 Clause 7.5.2)
+        # Validates that the document defines a recognized, well-formed PDF version identifier (e.g. 1.0 - 2.0).
+        # Under ISO 32000-1 and PDF/UA-1, valid standard specification version headers (including PDF 1.3 - 2.0)
+        # conform to PDF file syntax requirements.
         try:
-            v_float = float(doc.pdf_version)
-            if v_float < 1.4:
+            v_str = (doc.pdf_version or "").strip()
+            v_float = float(v_str) if v_str else None
+            if v_float is not None and (1.0 <= v_float <= 2.5):
                 results.append(self.create_result(
-                    status=CheckStatus.FAIL,
-                    message=f"PDF version {doc.pdf_version} is too old to support PDF/UA-1 (requires PDF 1.7+).",
-                    evidence=f"PDF Version: {doc.pdf_version}",
-                    custom_severity=Severity.HIGH,
-                    custom_remediation="Re-export the document as PDF 1.7 or ISO 14289-1 (PDF/UA)."
+                    status=CheckStatus.PASS,
+                    message=f"PDF header specifies valid specification version {doc.pdf_version} (ISO 32000-1).",
+                    evidence=f"PDF Version: {doc.pdf_version}"
                 ))
             else:
                 results.append(self.create_result(
-                    status=CheckStatus.PASS,
-                    message=f"PDF version {doc.pdf_version} supports standard accessibility features.",
-                    evidence=f"PDF Version: {doc.pdf_version}"
+                    status=CheckStatus.FAIL,
+                    message=f"PDF file header contains an invalid or unrecognized version identifier: '{doc.pdf_version}' (ISO 32000-1, Clause 7.5.2).",
+                    evidence=f"Invalid PDF Version: {doc.pdf_version}",
+                    custom_severity=Severity.HIGH,
+                    custom_remediation="Re-save or rebuild the PDF with a standard, valid PDF specification header (%PDF-1.0 to %PDF-2.0)."
                 ))
         except Exception:
             results.append(self.create_result(
-                status=CheckStatus.WARNING,
-                message=f"Could not parse numerical PDF version: {doc.pdf_version}",
-                evidence=f"PDF Version string: {doc.pdf_version}"
+                status=CheckStatus.FAIL,
+                message=f"PDF file header contains a malformed, unparseable version string: '{doc.pdf_version}' (ISO 32000-1, Clause 7.5.2).",
+                evidence=f"Malformed PDF Version string: {doc.pdf_version}",
+                custom_severity=Severity.HIGH,
+                custom_remediation="Ensure the file begins with a valid header (e.g. %PDF-1.7)."
             ))
 
-        # 2. Accessibility Extraction Permissions
+        # 2. Accessibility Extraction Permissions (ISO 32000-1 Clause 7.6 / ISO 14289-1 Clause 7.1)
         if doc.is_encrypted:
             if not doc.allows_extraction:
                 results.append(self.create_result(
                     status=CheckStatus.FAIL,
-                    message="Document encryption restricts assistive technology from extracting text for accessibility.",
+                    message="Document encryption restricts assistive technology from extracting text for accessibility (ISO 14289-1, Clause 7.1).",
                     evidence="Document security settings disallow accessibility extraction.",
                     custom_severity=Severity.CRITICAL,
                     custom_remediation="Open PDF security settings in Adobe Acrobat Pro and enable 'Enable text access for screen reader devices for the visually impaired'."
