@@ -87,3 +87,5 @@ REPORT/*.md
 # Generated accessibility report exports
 *_accessibility_report.pdf
 *_accessibility_report.html
+
+*.zip

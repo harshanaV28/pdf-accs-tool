@@ -5,6 +5,13 @@ from .quality_rules import (
     StructureQualityRule,
     TableRegularityQualityRule,
     LinkQualityRule,
+    TaggedContentPageBoundariesRule,
+    TOCIContainsLinkRule,
+    TOCILinkDestinationRule,
+    TextElementAltTextQualityRule,
+    NoteReferencedQualityRule,
+    NoteContainsLabelQualityRule,
+    ParagraphContainsNoteQualityRule,
 )
 
 QUALITY_RULES = [
@@ -12,6 +19,13 @@ QUALITY_RULES = [
     StructureQualityRule(),
     TableRegularityQualityRule(),
     LinkQualityRule(),
+    TaggedContentPageBoundariesRule(),
+    TOCIContainsLinkRule(),
+    TOCILinkDestinationRule(),
+    TextElementAltTextQualityRule(),
+    NoteReferencedQualityRule(),
+    NoteContainsLabelQualityRule(),
+    ParagraphContainsNoteQualityRule(),
 ]
 
 __all__ = [
@@ -20,4 +34,11 @@ __all__ = [
     "StructureQualityRule",
     "TableRegularityQualityRule",
     "LinkQualityRule",
+    "TaggedContentPageBoundariesRule",
+    "TOCIContainsLinkRule",
+    "TOCILinkDestinationRule",
+    "TextElementAltTextQualityRule",
+    "NoteReferencedQualityRule",
+    "NoteContainsLabelQualityRule",
+    "ParagraphContainsNoteQualityRule",
 ]

@@ -24,6 +24,7 @@ class DetailedResultsView(QWidget):
         super().__init__(parent)
         self.all_findings: List[CheckResult] = []
         self.filtered_findings: List[CheckResult] = []
+        self.rule_ids_filter: Optional[List[str]] = None
         self._init_ui()
 
     def _init_ui(self):
@@ -127,8 +128,17 @@ class DetailedResultsView(QWidget):
 
     def filter_by_category(self, standard: str, category: str):
         """Pre-filters table by selected category from Checkpoints view."""
+        self.rule_ids_filter = None
         self.combo_std.setCurrentText(standard if standard in ["PDF/UA", "WCAG", "Quality", "AI"] else "All Standards")
         self.search_input.setText(category)
+        self.btn_all.setChecked(True)
+        self._apply_filters()
+
+    def filter_by_rule_ids(self, rule_ids: List[str], standard: str = "All Standards", category_label: str = ""):
+        """Pre-filters table by specific rule IDs (e.g. for Quality checkpoint mapping)."""
+        self.rule_ids_filter = list(rule_ids)
+        self.combo_std.setCurrentText(standard if standard in ["PDF/UA", "WCAG", "Quality", "AI"] else "All Standards")
+        self.search_input.clear()
         self.btn_all.setChecked(True)
         self._apply_filters()
 
@@ -149,6 +159,8 @@ class DetailedResultsView(QWidget):
 
         filtered = []
         for r in self.all_findings:
+            if self.rule_ids_filter is not None and r.check_id not in self.rule_ids_filter:
+                continue
             if status_filter and r.status not in status_filter:
                 continue
             if std_filter != "All Standards" and r.standard.upper() != std_filter.upper():

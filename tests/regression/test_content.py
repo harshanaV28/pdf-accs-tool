@@ -177,3 +177,78 @@ class TestContentRegression:
         res_valid = rule.evaluate(doc_valid)
         assert len(res_valid) == 1
         assert res_valid[0].status == CheckStatus.PASS
+
+    def test_structure_mcid_existence_mcr_explicit_page(self):
+        """Tests that MCR with explicit /Pg pointing to a different page resolves correctly."""
+        from src.pdf_inspector.engine.pdf_ua.content_rules import StructureMCIDExistenceRule
+        rule = StructureMCIDExistenceRule()
+
+        # Case 1: Node has parent page=2, but MCR specifies MCID 7 on Page 1 and MCID 3 on Page 2
+        node = StructureNode(
+            id="p_multi", tag="P", standard_tag="P", page=2,
+            mcids=[7, 3],
+            mcid_entries=[(7, 1), (3, 2)]
+        )
+        root = StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[node])
+        page1 = PageModel(page_number=1, width=600, height=800, mcids=[7])
+        page2 = PageModel(page_number=2, width=600, height=800, mcids=[3])
+        doc_valid = PDFDocumentModel(
+            filepath="", filename="mcr_valid.pdf", filesize=100, pdf_version="1.7",
+            page_count=2, is_tagged=True, structure_tree=root, pages=[page1, page2]
+        )
+        res_valid = rule.evaluate(doc_valid)
+        assert len(res_valid) == 1
+        assert res_valid[0].status == CheckStatus.PASS
+
+        # Case 2: Node has MCR with explicit Page 1, but MCID 99 does not exist on Page 1
+        node_bad = StructureNode(
+            id="p_bad", tag="P", standard_tag="P", page=2,
+            mcids=[99],
+            mcid_entries=[(99, 1)]
+        )
+        root_bad = StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[node_bad])
+        doc_bad = PDFDocumentModel(
+            filepath="", filename="mcr_bad.pdf", filesize=100, pdf_version="1.7",
+            page_count=2, is_tagged=True, structure_tree=root_bad, pages=[page1, page2]
+        )
+        res_bad = rule.evaluate(doc_bad)
+        assert any(r.status == CheckStatus.FAIL and "references MCID 99" in r.message and r.page == 1 for r in res_bad)
+
+        # Case 3: MCR without explicit /Pg (None) falls back to node.page (Page 2)
+        node_fallback = StructureNode(
+            id="p_fb", tag="P", standard_tag="P", page=2,
+            mcids=[3],
+            mcid_entries=[(3, None)]
+        )
+        root_fb = StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[node_fallback])
+        doc_fb = PDFDocumentModel(
+            filepath="", filename="mcr_fb.pdf", filesize=100, pdf_version="1.7",
+            page_count=2, is_tagged=True, structure_tree=root_fb, pages=[page1, page2]
+        )
+        res_fb = rule.evaluate(doc_fb)
+        assert len(res_fb) == 1
+        assert res_fb[0].status == CheckStatus.PASS
+
+    def test_tagged_inside_artifact_mcid_vs_untagged_marker(self):
+        """Tests that only marked content with an MCID triggers tagged-inside-artifact failure."""
+        rule = TaggedInsideArtifactRule()
+
+        # Untagged marker inside artifact (tagged_in_artifact_count == 0) -> PASS
+        p_untagged = PageModel(page_number=1, width=600, height=800, tagged_in_artifact_count=0)
+        doc_untagged = PDFDocumentModel(
+            filepath="", filename="untagged_art.pdf", filesize=100, pdf_version="1.7",
+            page_count=1, is_tagged=True, pages=[p_untagged]
+        )
+        res_untagged = rule.evaluate(doc_untagged)
+        assert len(res_untagged) == 1
+        assert res_untagged[0].status == CheckStatus.PASS
+
+        # MCID tagged sequence inside artifact (tagged_in_artifact_count > 0) -> FAIL
+        p_tagged = PageModel(page_number=1, width=600, height=800, tagged_in_artifact_count=1)
+        doc_tagged = PDFDocumentModel(
+            filepath="", filename="tagged_art.pdf", filesize=100, pdf_version="1.7",
+            page_count=1, is_tagged=True, pages=[p_tagged]
+        )
+        res_tagged = rule.evaluate(doc_tagged)
+        assert any(r.status == CheckStatus.FAIL and r.page == 1 for r in res_tagged)
+

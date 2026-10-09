@@ -175,11 +175,26 @@ class CheckpointsView(QWidget):
         "4.1 Compatible",
     ]
 
-    QUALITY_CATEGORIES = [
-        "Heading Structure",
-        "Table Quality",
-        "Link Quality",
-    ]
+    QUALITY_RULE_MAPPINGS = {
+        "Validity of document title": ["PDFUA-META-002"],
+        "Artifacted content on page body": ["PDFUA-ART-003", "PDFUA-ARTIFACT-001", "PDFUA-CONTENT-004"],
+        "Tagged text consists of only whitespace": ["PDFUA-STRUCT-002"],
+        "Tagged content exists outside the page boundaries": ["QUAL-BOUND-001"],
+        "Presence of headings": ["QUAL-HEAD-001"],
+        "Presence of bookmarks": ["PDFUA-SETTINGS-003"],
+        '"TOCI" elements contain "Link" elements': ["QUAL-TOC-001"],
+        '"TOCI" elements correctly linked to headings': ["QUAL-TOC-002"],
+        "Validity of alternative texts": ["PDFUA-ALT-001", "AI-ALT-001"],
+        "Alternative text on text elements": ["QUAL-TEXT-001"],
+        'Completeness of "Link" elements': ["PDFUA-ANNOT-001", "QUAL-LINK-001"],
+        'Formal correctness of "LI" elements': ["PDFUA-LIST-001"],
+        'Completeness of "Table" elements': ["PDFUA-TABLE-001", "QUAL-TABLE-001"],
+        '"Note" elements are referenced': ["QUAL-NOTE-001"],
+        '"Note" elements contain "Lbl" elements': ["QUAL-NOTE-002"],
+        '"P" elements contain "Note" elements': ["QUAL-NOTE-003"],
+    }
+
+    QUALITY_CATEGORIES = list(QUALITY_RULE_MAPPINGS.keys())
 
     AI_CATEGORIES = [
         "AI Alt-Text Evaluation",
@@ -225,6 +240,11 @@ class CheckpointsView(QWidget):
         self.lbl_val_title = QLabel("-")
         self.lbl_val_title.setStyleSheet("color: #1e3a8a; font-weight: bold; font-size: 13px; background-color: #dbeafe; padding: 2px 6px; border-radius: 3px;")
 
+        lbl_t_author = QLabel("Author")
+        lbl_t_author.setStyleSheet("color: #64748b; font-size: 12px;")
+        self.lbl_val_author = QLabel("-")
+        self.lbl_val_author.setStyleSheet("color: #0f172a; font-size: 13px;")
+
         lbl_t_fn = QLabel("Filename")
         lbl_t_fn.setStyleSheet("color: #64748b; font-size: 12px;")
         self.lbl_val_fn = QLabel("-")
@@ -252,16 +272,18 @@ class CheckpointsView(QWidget):
 
         meta_grid.addWidget(lbl_t_title, 0, 0)
         meta_grid.addWidget(self.lbl_val_title, 0, 1)
-        meta_grid.addWidget(lbl_t_fn, 1, 0)
-        meta_grid.addWidget(self.lbl_val_fn, 1, 1)
-        meta_grid.addWidget(lbl_t_lang, 2, 0)
-        meta_grid.addWidget(self.lbl_val_lang, 2, 1)
-        meta_grid.addWidget(lbl_t_pages, 3, 0)
-        meta_grid.addWidget(self.lbl_val_pages, 3, 1)
-        meta_grid.addWidget(lbl_t_tags, 4, 0)
-        meta_grid.addWidget(self.lbl_val_tags, 4, 1)
-        meta_grid.addWidget(lbl_t_size, 5, 0)
-        meta_grid.addWidget(self.lbl_val_size, 5, 1)
+        meta_grid.addWidget(lbl_t_author, 1, 0)
+        meta_grid.addWidget(self.lbl_val_author, 1, 1)
+        meta_grid.addWidget(lbl_t_fn, 2, 0)
+        meta_grid.addWidget(self.lbl_val_fn, 2, 1)
+        meta_grid.addWidget(lbl_t_lang, 3, 0)
+        meta_grid.addWidget(self.lbl_val_lang, 3, 1)
+        meta_grid.addWidget(lbl_t_pages, 4, 0)
+        meta_grid.addWidget(self.lbl_val_pages, 4, 1)
+        meta_grid.addWidget(lbl_t_tags, 5, 0)
+        meta_grid.addWidget(self.lbl_val_tags, 5, 1)
+        meta_grid.addWidget(lbl_t_size, 6, 0)
+        meta_grid.addWidget(self.lbl_val_size, 6, 1)
 
         h_layout.addLayout(meta_grid)
         h_layout.addStretch()
@@ -353,17 +375,9 @@ class CheckpointsView(QWidget):
 
         bottom_layout.addStretch()
 
-        self.btn_tree = QPushButton("🌳 Tag Tree")
-        self.btn_tree.clicked.connect(self.request_tag_tree)
-        bottom_layout.addWidget(self.btn_tree)
-
         self.btn_stats = QPushButton("📊 Statistics")
         self.btn_stats.clicked.connect(self.request_statistics)
         bottom_layout.addWidget(self.btn_stats)
-
-        self.btn_preview = QPushButton("👁 Preview")
-        self.btn_preview.clicked.connect(self.request_preview)
-        bottom_layout.addWidget(self.btn_preview)
 
         main_layout.addWidget(bottom_bar)
 
@@ -371,7 +385,16 @@ class CheckpointsView(QWidget):
         """Updates all tables, status banners, tab icons, and document metadata summary."""
         pdfua_counts = report.get_category_counts("PDF/UA")
         wcag_counts = report.get_category_counts("WCAG")
-        quality_counts = report.get_category_counts("Quality")
+        # Quality counts computed via aggregated findings mapping
+        quality_counts: Dict[str, Dict[str, int]] = {}
+        for cat, rule_ids in self.QUALITY_RULE_MAPPINGS.items():
+            cat_results = [r for r in report.results if r.check_id in rule_ids]
+            p = sum(r.items_count for r in cat_results if r.status == CheckStatus.PASS)
+            w = sum(r.items_count for r in cat_results if r.status == CheckStatus.WARNING)
+            f = sum(r.items_count for r in cat_results if r.status in (CheckStatus.FAIL, CheckStatus.ERROR))
+            m = sum(r.items_count for r in cat_results if r.status == CheckStatus.MANUAL_REVIEW)
+            quality_counts[cat] = {"passed": p, "warned": w, "failed": f, "manual": m}
+
         ai_counts = report.get_category_counts("AI")
 
         self.table_pdf_ua.update_counts(pdfua_counts)
@@ -405,7 +428,8 @@ class CheckpointsView(QWidget):
 
         # Update metadata card if doc model provided
         if doc is not None:
-            self.lbl_val_title.setText(doc.title if doc.title else doc.filename)
+            self.lbl_val_title.setText(doc.title.strip() if doc.title and doc.title.strip() else "No title")
+            self.lbl_val_author.setText(doc.author.strip() if doc.author and doc.author.strip() else "No author")
             self.lbl_val_fn.setText(doc.filename)
             self.lbl_val_lang.setText(doc.language if doc.language else "-")
             self.lbl_val_pages.setText(str(doc.page_count))

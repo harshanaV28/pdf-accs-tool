@@ -87,6 +87,7 @@ class StructureNode:
     lang: Optional[str] = None
     page: Optional[int] = None
     mcids: List[int] = field(default_factory=list)
+    mcid_entries: List[Tuple[int, Optional[int]]] = field(default_factory=list)
     attributes: Dict[str, Any] = field(default_factory=dict)
     children: List['StructureNode'] = field(default_factory=list)
     text_content: str = ""

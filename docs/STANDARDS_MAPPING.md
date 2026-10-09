@@ -26,12 +26,16 @@ PDF Accessibility Inspector implements automated checks and manual inspection wo
 | `PDFUA-META-002` | Metadata | 06-003 | 7.9 | XMP metadata stream must contain the document title in the Dublin Core namespace (`<dc:title>`). Legacy trailer `/Info /Title` does not satisfy this clause. |
 | `PDFUA-META-003` | Metadata | 06-002 | 7.9 | XMP metadata stream must declare PDF/UA conformance (`pdfaProperty` or `pdfuaid:part="1"`). |
 | `PDFUA-SETTINGS-001` | Document settings | 07-001 | 7.10 | `/ViewerPreferences` dictionary must specify `/DisplayDocTitle true`. |
-| `PDFUA-SETTINGS-002` | Document settings | 07-003 | 7.10 | Page tab navigation order must be set to Document Structure order (`/Tabs /S`). |
-| `PDFUA-SETTINGS-003` | Document settings | 31-003 | 7.18 | MarkInfo dictionary must not have `/Suspects true` (unresolved OCR suspects). |
+| `PDFUA-SETTINGS-003` | Document settings | 21-002 | 7.19 | Documents with more than 20 pages must include bookmarks for document outline navigation. |
+| `PDFUA-ANNOT-001` | Annotations | 19-001 | 7.18 | All interactive annotations must be associated with a structure element in the structure tree. |
+| `PDFUA-ANNOT-002` | Annotations | 17-001 | 7.18.1 | In tagged documents, each page containing annotations must specify Structure tab order (`/Tabs /S`). |
+| `PDFUA-FORM-001` | Forms | 08-001, 08-003 | 7.18 | Interactive form fields must define accessible tooltips (`/TU`) and valid field names (`/T`). |
+| `PDFUA-LIST-001` | Structure elements | 28-001, 28-002 | 7.4 | `<L>` must contain `<LI>` (or `<Caption>`), and `<LI>` must contain `<Lbl>` and/or `<LBody>`. |
+| `PDFUA-TABLE-001` | Tables | 15-001 | 7.5 | Data tables must include header cells (`<TH>`) and maintain valid `Table` > `TR` > `TH`/`TD` structure. |
 | `PDFUA-TREE-001` | Structure tree | 13-001 | 7.1 | Logical structure tree root `/StructTreeRoot` must be present, non-empty, and conform to ISO 32000-1 Clause 14.8.4 parent-child admissibility. |
-| `PDFUA-STRUCT-001` | Structure elements | 13-002 | 7.4 | Structural elements must follow standard containment (e.g. `Table` > `TR` > `TH`/`TD`, `L` > `LI` > `Lbl`/`LBody`). |
+| `PDFUA-STRUCT-001` | Structure elements | 13-002 | 7.4 | Structural elements must follow standard containment and nesting rules. |
 | `PDFUA-STRUCT-002` | Structure elements | 13-005 | 7.1 | Structure elements must not be empty unless serving as structural grouping containers. |
-| `PDFUA-FIG-001` | Structure elements | 16-001 | 7.3 | A `<Figure>` structure element appearing entirely on a single page must specify a `/BBox` attribute in its attribute dictionary. |
+| `PDFUA-FIG-001` | Structure elements | 16-001 | 7.3 | A `<Figure>` structure element appearing entirely on a single page must specify a valid `/BBox` attribute array. |
 | `PDFUA-ROLE-001` | Role mapping | 13-003 | 7.4.4 | Custom structure types must be mapped to standard ISO 32000-1 roles in `/RoleMap`. |
 | `PDFUA-ROLE-002` | Role mapping | 13-004 | 7.4.4 | `/RoleMap` must not contain circular mappings. |
 | `PDFUA-ALT-001` | Alternative Descriptions | 09-001 | 7.3 | All `<Figure>` elements representing non-decorative visuals must provide non-empty `/Alt` text. |

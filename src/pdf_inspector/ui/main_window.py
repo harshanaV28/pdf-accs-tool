@@ -439,18 +439,34 @@ class MainWindow(QMainWindow):
         """User single clicked a checkpoint category in Checkpoints view; preview in Right Panel."""
         if not self.current_report:
             return
-        cat_findings = [
-            r for r in self.current_report.results
-            if r.standard.upper() == standard.upper() and r.category.lower() == category.lower()
-        ]
-        counts = self.current_report.get_category_counts(standard).get(
-            category, {"passed": 0, "warned": 0, "failed": 0, "manual": 0}
-        )
+        if standard.upper() == "QUALITY":
+            rule_ids = CheckpointsView.QUALITY_RULE_MAPPINGS.get(category, [])
+            cat_findings = [
+                r for r in self.current_report.results
+                if r.check_id in rule_ids
+            ]
+            p = sum(r.items_count for r in cat_findings if r.status == CheckStatus.PASS)
+            w = sum(r.items_count for r in cat_findings if r.status == CheckStatus.WARNING)
+            f = sum(r.items_count for r in cat_findings if r.status in (CheckStatus.FAIL, CheckStatus.ERROR))
+            m = sum(r.items_count for r in cat_findings if r.status == CheckStatus.MANUAL_REVIEW)
+            counts = {"passed": p, "warned": w, "failed": f, "manual": m}
+        else:
+            cat_findings = [
+                r for r in self.current_report.results
+                if r.standard.upper() == standard.upper() and r.category.lower() == category.lower()
+            ]
+            counts = self.current_report.get_category_counts(standard).get(
+                category, {"passed": 0, "warned": 0, "failed": 0, "manual": 0}
+            )
         self.right_panel.display_category_summary(standard, category, counts, cat_findings)
 
     def _on_checkpoint_category_selected(self, standard: str, category: str):
         """User double clicked a checkpoint category in Checkpoints view; jump to Detailed Findings."""
-        self.detailed_view.filter_by_category(standard, category)
+        if standard.upper() == "QUALITY":
+            rule_ids = CheckpointsView.QUALITY_RULE_MAPPINGS.get(category, [])
+            self.detailed_view.filter_by_rule_ids(rule_ids, standard="All Standards", category_label=category)
+        else:
+            self.detailed_view.filter_by_category(standard, category)
         self.sidebar.select_page("Detailed Findings")
 
     def _on_finding_selected(self, finding: CheckResult):

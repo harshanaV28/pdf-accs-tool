@@ -22,8 +22,6 @@ class Sidebar(QWidget):
         ("Checkpoints", "✅ Checkpoints (PAC Matrix)"),
         ("Detailed Findings", "📋 Detailed Results"),
         ("PDF Viewer", "🔍 Integrated PDF Viewer"),
-        ("Tag Tree", "🌳 Logical Tag Tree"),
-        ("Semantic Reading Preview", "📖 Semantic Reading Preview"),
         ("Document Metadata", "ℹ️ Document & Metadata"),
         ("Statistics", "📊 Statistics & Health"),
         ("Fonts", "🔤 Font Assets"),

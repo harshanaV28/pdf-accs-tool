@@ -1,6 +1,8 @@
 """
 WCAG 2.1 / 2.2 AA Rules Suite
-Implements accessibility checks mapped across the 13 WCAG guidelines.
+Implements object-level accessibility checks mapped across the 13 WCAG guidelines.
+Evaluates individual non-text elements, headings, lists, tables, fonts, links, and forms
+with standards-based zero-applicable object handling.
 """
 
 from typing import List, Dict, Any, Set
@@ -17,35 +19,81 @@ class WCAGTextAlternativesRule(BaseRule):
     standard = "WCAG"
     severity = Severity.HIGH
     description = "All non-text content presented to users has a text alternative serving equivalent purpose (WCAG SC 1.1.1)."
-    remediation_template = "Add descriptive alternative text to all non-decorative images and figures."
+    remediation_template = "Add descriptive alternative text to all non-decorative images, figures, and formulas."
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
-        results = []
-        if not doc.images and not (doc.structure_tree and doc.structure_tree.find_all_by_standard_tag("Figure")):
-            return [self.create_result(
-                status=CheckStatus.PASS,
-                message="No non-text content (images, figures) found in the document.",
-                evidence="Image count: 0"
-            )]
+        results: List[CheckResult] = []
 
-        missing_alt = [img for img in doc.images if not img.is_artifact and not img.has_alt]
-        if missing_alt:
-            for img in missing_alt[:5]:
-                results.append(self.create_result(
-                    status=CheckStatus.FAIL,
-                    message=f"Image on page {img.page} lacks alternative text (WCAG SC 1.1.1).",
-                    evidence=f"Image at {img.bbox}",
-                    page=img.page,
-                    bounding_box=img.bbox,
-                    object_reference=f"Image {img.id}",
-                    custom_remediation="Add alternative text or mark image as decorative artifact."
-                ))
-        else:
-            results.append(self.create_result(
-                status=CheckStatus.PASS,
-                message="All detected images have text alternatives or are tagged as figures.",
-                evidence=f"Images checked: {len(doc.images)}"
-            ))
+        # 1. Structure elements: Figure, Formula, Form
+        if doc.structure_tree:
+            all_nodes = [n for n in doc.structure_tree.find_all_nodes() if n.tag != "StructTreeRoot"]
+            non_text_nodes = [
+                n for n in all_nodes
+                if (n.standard_tag or "").upper() in ("FIGURE", "FORMULA", "FORM")
+                and not n.is_artifact
+            ]
+            for node in non_text_nodes:
+                has_alt = bool(
+                    (node.alt_text and node.alt_text.strip()) or
+                    (node.actual_text and node.actual_text.strip())
+                )
+                if not has_alt and node.children:
+                    has_child_text = any(
+                        (c.alt_text and c.alt_text.strip()) or
+                        (c.actual_text and c.actual_text.strip()) or
+                        (c.text_content and c.text_content.strip())
+                        for c in node.children
+                    )
+                    if has_child_text:
+                        has_alt = True
+
+                if has_alt:
+                    alt_val = (node.alt_text or node.actual_text or "").strip()
+                    results.append(self.create_result(
+                        status=CheckStatus.PASS,
+                        message=f"Alternative text is present for <{node.tag}> on page {node.page or 1}.",
+                        evidence=f"<{node.tag}> on page {node.page or 1}: '{alt_val[:100]}'",
+                        page=node.page,
+                        bounding_box=node.bbox or node.struct_bbox,
+                        object_reference=f"<{node.tag} id='{node.id}'>"
+                    ))
+                else:
+                    results.append(self.create_result(
+                        status=CheckStatus.FAIL,
+                        message=f"<{node.tag}> on page {node.page or 1} lacks a text alternative (/Alt or /ActualText) (WCAG SC 1.1.1).",
+                        evidence=f"<{node.tag}> on page {node.page or 1} has no /Alt or /ActualText attribute.",
+                        page=node.page,
+                        bounding_box=node.bbox or node.struct_bbox,
+                        object_reference=f"<{node.tag} id='{node.id}'>",
+                        custom_severity=Severity.HIGH,
+                        custom_remediation=f"Add alternative text (/Alt) to the <{node.tag}> element in your authoring tool."
+                    ))
+
+        # 2. Raster images not inside structure tree or untagged
+        if not doc.structure_tree or not doc.is_tagged:
+            for img in doc.images:
+                if img.is_artifact:
+                    continue
+                if img.has_alt:
+                    results.append(self.create_result(
+                        status=CheckStatus.PASS,
+                        message=f"Alternative text is present for image on page {img.page}.",
+                        evidence=f"Image {img.id} on page {img.page}: '{img.alt_text[:100]}'",
+                        page=img.page,
+                        bounding_box=img.bbox,
+                        object_reference=f"Image {img.id}"
+                    ))
+                else:
+                    results.append(self.create_result(
+                        status=CheckStatus.FAIL,
+                        message=f"Image on page {img.page} lacks alternative text (WCAG SC 1.1.1).",
+                        evidence=f"Image {img.id} at {img.bbox}",
+                        page=img.page,
+                        bounding_box=img.bbox,
+                        object_reference=f"Image {img.id}",
+                        custom_severity=Severity.HIGH,
+                        custom_remediation="Add alternative text or mark image as decorative artifact."
+                    ))
 
         return results
 
@@ -60,11 +108,34 @@ class WCAGTimeBasedMediaRule(BaseRule):
     remediation_template = "Provide synchronized captions or text transcripts for embedded media."
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
-        return [self.create_result(
-            status=CheckStatus.PASS,
-            message="No time-based multimedia or audio/video streams detected.",
-            evidence="No media annotations found."
-        )]
+        media_annots = [
+            a for a in doc.annotations
+            if a.subtype in ("Movie", "Screen", "RichMedia", "3D", "Sound")
+        ]
+        if not media_annots:
+            return []
+
+        results: List[CheckResult] = []
+        for annot in media_annots:
+            if annot.contents or annot.is_tagged:
+                results.append(self.create_result(
+                    status=CheckStatus.PASS,
+                    message=f"Time-based media annotation on page {annot.page} has accessible description.",
+                    evidence=f"Media annotation '{annot.id}' on page {annot.page}",
+                    page=annot.page,
+                    object_reference=f"Annotation {annot.id}"
+                ))
+            else:
+                results.append(self.create_result(
+                    status=CheckStatus.FAIL,
+                    message=f"Time-based media annotation on page {annot.page} lacks accessible text transcript or captions (SC 1.2).",
+                    evidence=f"Media annotation '{annot.id}' on page {annot.page}",
+                    page=annot.page,
+                    object_reference=f"Annotation {annot.id}",
+                    custom_severity=Severity.MEDIUM,
+                    custom_remediation="Provide synchronized captions or transcript for embedded media."
+                ))
+        return results
 
 
 class WCAGAdaptableRule(BaseRule):
@@ -77,77 +148,71 @@ class WCAGAdaptableRule(BaseRule):
     remediation_template = "Ensure headings, tables, and lists use appropriate structural tags."
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
-        results = []
+        results: List[CheckResult] = []
         if not doc.is_tagged:
-            results.append(self.create_result(
+            return [self.create_result(
                 status=CheckStatus.FAIL,
                 message="Untagged document fails Info and Relationships (SC 1.3.1). Structure is lost.",
                 evidence="Document is not tagged.",
                 custom_severity=Severity.CRITICAL,
                 custom_remediation="Tag the document to convey relationships to assistive technologies."
-            ))
-            return results
+            )]
 
-        # Verify Table headers
-        tables_without_headers = [t for t in doc.tables if not t.has_headers]
-        if tables_without_headers:
-            for t in tables_without_headers[:3]:
+        # Tables (SC 1.3.1)
+        for t in doc.tables:
+            if t.has_headers:
+                results.append(self.create_result(
+                    status=CheckStatus.PASS,
+                    message=f"Table on page {t.page} has header cells (<TH>).",
+                    evidence=f"Table {t.id} has {t.header_cells_count} header cell(s).",
+                    page=t.page,
+                    object_reference=f"Table {t.id}"
+                ))
+            else:
                 results.append(self.create_result(
                     status=CheckStatus.FAIL,
                     message=f"Table on page {t.page} lacks header cells (<TH>) (SC 1.3.1).",
-                    evidence=f"Table has {t.rows_count} rows, {t.cols_count} columns, 0 header cells.",
+                    evidence=f"Table {t.id} has {t.rows_count} rows, {t.cols_count} columns, 0 header cells.",
                     page=t.page,
                     object_reference=f"Table {t.id}",
                     custom_remediation="Tag column and row headers with <TH> and assign Scope."
                 ))
-        elif doc.tables:
-            results.append(self.create_result(
-                status=CheckStatus.PASS,
-                message=f"All {len(doc.tables)} table(s) contain designated header cells (<TH>).",
-                evidence="Table headers present."
-            ))
 
-        # Check Headings
         if doc.structure_tree:
-            headings = [n for n in doc.structure_tree.find_all_nodes() if (n.standard_tag or "").upper() in ("H", "H1", "H2", "H3", "H4", "H5", "H6")]
-            if not headings:
-                results.append(self.create_result(
-                    status=CheckStatus.WARNING,
-                    message="Document contains no tagged headings (<H1>-<H6>). Content hierarchy may be difficult to navigate (SC 1.3.1).",
-                    evidence="No heading tags found in structure tree.",
-                    custom_remediation="Tag section titles and headings with appropriate heading levels."
-                ))
-            else:
+            all_nodes = [n for n in doc.structure_tree.find_all_nodes() if n.tag != "StructTreeRoot"]
+
+            # Headings (SC 1.3.1)
+            headings = [n for n in all_nodes if (n.standard_tag or "").upper() in ("H", "H1", "H2", "H3", "H4", "H5", "H6")]
+            for h in headings:
                 results.append(self.create_result(
                     status=CheckStatus.PASS,
-                    message=f"Document contains {len(headings)} structured heading element(s).",
-                    evidence=f"Heading tags count: {len(headings)}"
+                    message=f"Structured heading <{h.tag}> on page {h.page or 1} conveys content hierarchy.",
+                    evidence=f"Heading <{h.tag}> on page {h.page or 1}",
+                    page=h.page,
+                    object_reference=f"<{h.tag} id='{h.id}'>"
                 ))
 
-            # Check Lists (SC 1.3.1)
-            all_nodes = [n for n in doc.structure_tree.find_all_nodes() if n.tag != "StructTreeRoot"]
+            # List items (SC 1.3.1)
             list_items = [n for n in all_nodes if (n.standard_tag or "").upper() == "LI"]
-            invalid_lis = []
             for li in list_items:
                 invalid_children = [c for c in li.children if (c.standard_tag or "").upper() not in ("LBL", "LBODY")]
                 if invalid_children:
-                    invalid_lis.append((li, invalid_children))
-            if invalid_lis:
-                for li, inv in invalid_lis[:3]:
                     results.append(self.create_result(
                         status=CheckStatus.FAIL,
-                        message=f"List item on page {li.page or 1} has invalid structure (SC 1.3.1). Found <{inv[0].tag}> inside <LI>.",
-                        evidence=f"LI on page {li.page} contains {[c.tag for c in inv]}; list items must only contain <Lbl> and/or <LBody>.",
+                        message=f"List item on page {li.page or 1} contains invalid child <{invalid_children[0].tag}> (SC 1.3.1).",
+                        evidence=f"LI on page {li.page or 1} contains {[c.tag for c in invalid_children]}; must only contain <Lbl> and/or <LBody>.",
                         page=li.page or 1,
-                        object_reference=f"<LI> on page {li.page or 1}",
+                        object_reference=f"<LI id='{li.id}'>",
                         custom_remediation="Structure list items with <Lbl> for bullet/number and <LBody> for list content."
                     ))
-            elif list_items:
-                results.append(self.create_result(
-                    status=CheckStatus.PASS,
-                    message=f"All {len(list_items)} list item(s) conform to SC 1.3.1 list structure requirements.",
-                    evidence="List items properly structured with <Lbl> and <LBody>."
-                ))
+                else:
+                    results.append(self.create_result(
+                        status=CheckStatus.PASS,
+                        message=f"List item <LI> on page {li.page or 1} conforms to SC 1.3.1 list structure requirements.",
+                        evidence=f"<LI> on page {li.page or 1}",
+                        page=li.page or 1,
+                        object_reference=f"<LI id='{li.id}'>"
+                    ))
 
         return results
 
@@ -158,28 +223,17 @@ class WCAGDistinguishableRule(BaseRule):
     category = "1.4 Distinguishable"
     standard = "WCAG"
     severity = Severity.MEDIUM
-    description = "Make it easier for users to see and hear content including separating foreground from background (Contrast SC 1.4.3, Font Embedding PDF16)."
-    remediation_template = "Verify visual contrast of text against background meets 4.5:1 for regular text and 3:1 for large text."
+    machine_testable = False
+    description = "Make it easier for users to see and hear content including separating foreground from background (WCAG SC 1.4.1 Use of Color, SC 1.4.3 Contrast Minimum, SC 1.4.11 Non-text Contrast)."
+    remediation_template = "Verify visual contrast ratio of text against background meets 4.5:1 for regular text and 3:1 for large text or graphical objects."
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
-        results = []
-        unembedded = [f for f in doc.fonts if not f.is_embedded and f.is_used]
-        if unembedded:
-            results.append(self.create_result(
-                status=CheckStatus.FAIL,
-                message=f"{len(unembedded)} font(s) are not embedded, risking inaccurate text presentation (WCAG 1.4 / PDF16).",
-                evidence=f"Unembedded font(s): {', '.join(f.name for f in unembedded[:3])}",
-                page=unembedded[0].pages[0] if unembedded[0].pages else 1,
-                custom_remediation="Embed all fonts in the document."
-            ))
-
-        results.append(self.create_result(
+        return [self.create_result(
             status=CheckStatus.MANUAL_REVIEW,
-            message="Verify color contrast (minimum 4.5:1 for normal text, 3:1 for large text) and ensure color is not the only means of conveying information (SC 1.4.1, 1.4.3).",
-            evidence="Color contrast requires visual sampling or human verification.",
+            message="Verify visual color contrast (minimum 4.5:1 for standard text, 3:1 for large text/icons) and ensure color is not the only means of conveying information (WCAG SC 1.4.1, SC 1.4.3, SC 1.4.11).",
+            evidence="Color contrast and use-of-color require visual sampling and human verification.",
             manual_review_required=True
-        ))
-        return results
+        )]
 
 
 class WCAGKeyboardAccessibleRule(BaseRule):
@@ -192,29 +246,30 @@ class WCAGKeyboardAccessibleRule(BaseRule):
     remediation_template = "Ensure page tab navigation follows document structure order."
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
-        results = []
-        if doc.form_fields or doc.links:
-            bad_tabs = [p.page_number for p in doc.pages if p.tab_order_mode != "S"]
-            if bad_tabs and doc.is_tagged:
+        if not doc.form_fields and not doc.links:
+            return []
+
+        results: List[CheckResult] = []
+        interactive_pages = set([f.page for f in doc.form_fields if f.page] + [l.page for l in doc.links if l.page])
+
+        for p in doc.pages:
+            if p.page_number not in interactive_pages:
+                continue
+            if p.tab_order_mode == "S":
                 results.append(self.create_result(
-                    status=CheckStatus.WARNING,
-                    message=f"Page tab order on pages {bad_tabs[:5]} is not set to Structure order for keyboard focus navigation (SC 2.1.1).",
-                    evidence=f"Pages missing /Tabs /S: {bad_tabs[:5]}",
-                    page=bad_tabs[0],
-                    custom_remediation="Set page Tab Order to 'Use Document Structure' in Page Properties."
+                    status=CheckStatus.PASS,
+                    message=f"Page {p.page_number} tab order is set to Document Structure for keyboard focus (SC 2.1.1).",
+                    evidence=f"Page {p.page_number} /Tabs is /S",
+                    page=p.page_number
                 ))
             else:
                 results.append(self.create_result(
-                    status=CheckStatus.PASS,
-                    message="Keyboard focus and tab order conform to logical document structure.",
-                    evidence="Page tab order is valid."
+                    status=CheckStatus.WARNING,
+                    message=f"Page {p.page_number} contains interactive elements but tab order is not set to Structure order (SC 2.1.1).",
+                    evidence=f"Page {p.page_number} /Tabs: {p.tab_order_mode}",
+                    page=p.page_number,
+                    custom_remediation="Set page Tab Order to 'Use Document Structure' in Page Properties."
                 ))
-        else:
-            results.append(self.create_result(
-                status=CheckStatus.PASS,
-                message="Document has no interactive controls or links requiring tab navigation.",
-                evidence="No links or form widgets detected."
-            ))
 
         return results
 
@@ -229,11 +284,7 @@ class WCAGEnoughTimeRule(BaseRule):
     remediation_template = "Do not set automated timeouts or slide transitions without user pause controls."
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
-        return [self.create_result(
-            status=CheckStatus.PASS,
-            message="No timed transitions, automated page flips, or timeouts detected.",
-            evidence="Static document presentation."
-        )]
+        return []
 
 
 class WCAGSeizuresRule(BaseRule):
@@ -246,11 +297,7 @@ class WCAGSeizuresRule(BaseRule):
     remediation_template = "Avoid animations or blinking content that flashes more than three times per second."
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
-        return [self.create_result(
-            status=CheckStatus.PASS,
-            message="No flashing or rapid animated content detected in the document.",
-            evidence="No flashing multimedia streams found."
-        )]
+        return []
 
 
 class WCAGNavigableRule(BaseRule):
@@ -263,7 +310,7 @@ class WCAGNavigableRule(BaseRule):
     remediation_template = "Set document title, enable DisplayDocTitle, provide bookmarks, and write descriptive link text."
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
-        results = []
+        results: List[CheckResult] = []
 
         # 1. SC 2.4.2: Page / Document Titled & Displayed
         has_title = bool((doc.xmp_dc_title and doc.xmp_dc_title.strip()) or (doc.doc_info_title and doc.doc_info_title.strip()))
@@ -277,7 +324,7 @@ class WCAGNavigableRule(BaseRule):
         elif not doc.display_doc_title:
             results.append(self.create_result(
                 status=CheckStatus.WARNING,
-                message="Document has a title but /DisplayDocTitle is false or missing (WCAG SC 2.4.2 / PDF18). User agents will display filename in title bar.",
+                message="Document has a title but /DisplayDocTitle is false or missing (WCAG SC 2.4.2 / PDF Technique 18). User agents will display filename in title bar.",
                 evidence=f"Title: '{doc.title}', /DisplayDocTitle: {doc.display_doc_title}",
                 custom_remediation="Set Initial View > Show > Document Title in File Properties."
             ))
@@ -290,52 +337,56 @@ class WCAGNavigableRule(BaseRule):
 
         # 2. SC 2.4.6: Headings and Labels
         if doc.structure_tree:
-            headings = [n for n in doc.structure_tree.find_all_nodes() if (n.standard_tag or "").upper() in ("H", "H1", "H2", "H3", "H4", "H5", "H6")]
-            if not headings:
-                results.append(self.create_result(
-                    status=CheckStatus.WARNING,
-                    message="Document lacks heading markup (<H1>-<H6>) for navigation (SC 2.4.6).",
-                    evidence="Heading tags count: 0",
-                    custom_remediation="Structure document sections using heading tags."
-                ))
-            else:
+            all_nodes = [n for n in doc.structure_tree.find_all_nodes() if n.tag != "StructTreeRoot"]
+            headings = [n for n in all_nodes if (n.standard_tag or "").upper() in ("H", "H1", "H2", "H3", "H4", "H5", "H6")]
+            if headings:
                 results.append(self.create_result(
                     status=CheckStatus.PASS,
                     message=f"Document provides {len(headings)} heading element(s) for navigational structure (SC 2.4.6).",
                     evidence=f"Headings count: {len(headings)}"
                 ))
+            elif doc.page_count > 1:
+                results.append(self.create_result(
+                    status=CheckStatus.WARNING,
+                    message="Multi-page document lacks heading markup (<H1>-<H6>) for navigation (SC 2.4.6).",
+                    evidence="Heading tags count: 0",
+                    custom_remediation="Structure document sections using heading tags."
+                ))
 
         # 3. SC 2.4.5: Bookmarks / Multiple Ways
-        if doc.page_count > 5 and not doc.bookmarks:
+        if doc.bookmarks:
+            results.append(self.create_result(
+                status=CheckStatus.PASS,
+                message=f"Document provides navigational bookmarks ({len(doc.bookmarks)} top-level items) (SC 2.4.5).",
+                evidence=f"Bookmarks present: {len(doc.bookmarks)}"
+            ))
+        elif doc.page_count > 5:
             results.append(self.create_result(
                 status=CheckStatus.WARNING,
                 message=f"Multi-page document ({doc.page_count} pages) has no Bookmarks/Outlines for navigation (SC 2.4.5).",
                 evidence=f"Page count: {doc.page_count}, Bookmarks count: 0",
                 custom_remediation="Generate bookmarks from heading structure in Acrobat Pro or Word/InDesign."
             ))
-        elif doc.bookmarks:
-            results.append(self.create_result(
-                status=CheckStatus.PASS,
-                message=f"Document provides navigational bookmarks ({len(doc.bookmarks)} top-level items) (SC 2.4.5).",
-                evidence="Bookmarks present."
-            ))
 
         # 4. SC 2.4.4: Link purpose
-        ambiguous_links = []
         for l in doc.links:
             text = l.text.lower().strip()
             if text in ("click here", "read more", "more", "link", "details", "here", "info"):
-                ambiguous_links.append((l.text, l.page, l.bbox))
-
-        if ambiguous_links:
-            for txt, pg, bbox in ambiguous_links[:3]:
                 results.append(self.create_result(
                     status=CheckStatus.WARNING,
-                    message=f"Ambiguous link text '{txt}' on page {pg} does not convey purpose out of context (SC 2.4.4).",
-                    evidence=f"Link text: '{txt}' at {bbox}",
-                    page=pg,
-                    bounding_box=bbox,
+                    message=f"Ambiguous link text '{l.text}' on page {l.page} does not convey purpose out of context (SC 2.4.4).",
+                    evidence=f"Link text: '{l.text}' targeting {l.uri}",
+                    page=l.page,
+                    bounding_box=l.bbox,
                     custom_remediation="Make link text descriptive of its target destination."
+                ))
+            elif l.text.strip():
+                results.append(self.create_result(
+                    status=CheckStatus.PASS,
+                    message=f"Link on page {l.page} has descriptive text: '{l.text.strip()[:60]}'.",
+                    evidence=f"Link: '{l.text.strip()[:60]}'",
+                    page=l.page,
+                    bounding_box=l.bbox
                 ))
 
         return results
@@ -351,11 +402,7 @@ class WCAGInputModalitiesRule(BaseRule):
     remediation_template = "Ensure visible text labels match accessible names."
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
-        return [self.create_result(
-            status=CheckStatus.PASS,
-            message="No input modality conflicts detected with touch or pointer gestures.",
-            evidence="Form and link modalities verified."
-        )]
+        return []
 
 
 class WCAGReadableRule(BaseRule):
@@ -368,7 +415,7 @@ class WCAGReadableRule(BaseRule):
     remediation_template = "Set default document language and mark language switches."
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
-        results = []
+        results: List[CheckResult] = []
         if not doc.language:
             results.append(self.create_result(
                 status=CheckStatus.FAIL,
@@ -383,6 +430,19 @@ class WCAGReadableRule(BaseRule):
                 evidence=f"Document language: {doc.language}"
             ))
 
+        # Language of Parts (SC 3.1.2)
+        if doc.structure_tree:
+            all_nodes = [n for n in doc.structure_tree.find_all_nodes() if n.tag != "StructTreeRoot"]
+            lang_nodes = [n for n in all_nodes if n.lang and n.lang.strip()]
+            for n in lang_nodes:
+                results.append(self.create_result(
+                    status=CheckStatus.PASS,
+                    message=f"Language switch on <{n.tag}> on page {n.page or 1} is declared as '{n.lang}'.",
+                    evidence=f"<{n.tag}> /Lang: '{n.lang}'",
+                    page=n.page,
+                    object_reference=f"<{n.tag} id='{n.id}'>"
+                ))
+
         return results
 
 
@@ -396,11 +456,7 @@ class WCAGPredictableRule(BaseRule):
     remediation_template = "Avoid automated submit actions or context jumps when form fields receive focus."
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
-        return [self.create_result(
-            status=CheckStatus.PASS,
-            message="Interactive fields and links operate predictably without unexpected context changes.",
-            evidence="Action triggers conform to standard behavior."
-        )]
+        return []
 
 
 class WCAGInputAssistanceRule(BaseRule):
@@ -413,17 +469,21 @@ class WCAGInputAssistanceRule(BaseRule):
     remediation_template = "Provide clear tooltips (/TU) or accessible labels for all interactive form fields."
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
-        results = []
         if not doc.form_fields:
-            return [self.create_result(
-                status=CheckStatus.PASS,
-                message="No interactive form fields found in document.",
-                evidence="Form fields count: 0"
-            )]
+            return []
 
-        fields_missing_tooltip = [f for f in doc.form_fields if not f.tooltip or not f.tooltip.strip()]
-        if fields_missing_tooltip:
-            for f in fields_missing_tooltip[:5]:
+        results: List[CheckResult] = []
+        for f in doc.form_fields:
+            if f.tooltip and f.tooltip.strip():
+                results.append(self.create_result(
+                    status=CheckStatus.PASS,
+                    message=f"Form field '{f.name}' on page {f.page} has accessible description/tooltip.",
+                    evidence=f"Field '{f.name}' /TU: '{f.tooltip}'",
+                    page=f.page,
+                    bounding_box=f.bbox,
+                    object_reference=f"FormField '{f.name}'"
+                ))
+            else:
                 results.append(self.create_result(
                     status=CheckStatus.FAIL,
                     message=f"Form field '{f.name}' lacks an accessible tooltip (/TU description) on page {f.page} (SC 3.3.2).",
@@ -433,13 +493,6 @@ class WCAGInputAssistanceRule(BaseRule):
                     object_reference=f"FormField '{f.name}'",
                     custom_remediation="Open Form field properties in Acrobat Pro, go to General tab, and enter a helpful Tooltip."
                 ))
-        else:
-            results.append(self.create_result(
-                status=CheckStatus.PASS,
-                message=f"All {len(doc.form_fields)} form field(s) have accessible tooltips/descriptions.",
-                evidence="Form field tooltips verified."
-            ))
-
         return results
 
 
@@ -449,66 +502,67 @@ class WCAGCompatibleRule(BaseRule):
     category = "4.1 Compatible"
     standard = "WCAG"
     severity = Severity.HIGH
-    description = "Maximize compatibility with assistive technologies through valid roles, names, and structure (WCAG SC 4.1.2 Name, Role, Value)."
-    remediation_template = "Ensure all structural elements have standard roles, role mapping is valid without circularity, and interactive elements are tagged."
+    description = "Maximize compatibility with assistive technologies through valid user interface component names, roles, and values (WCAG SC 4.1.2 Name, Role, Value)."
+    remediation_template = "Ensure all interactive controls, links, and form fields have accessible names, standard roles, and valid properties."
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
-        results = []
+        results: List[CheckResult] = []
 
-        if not doc.is_tagged or doc.structure_tree is None:
+        if not doc.is_tagged and (doc.links or doc.form_fields or doc.annotations):
             return [self.create_result(
                 status=CheckStatus.FAIL,
-                message="Document is untagged; assistive technologies cannot parse semantic roles or names (SC 4.1.2).",
-                evidence="Tagged PDF: false, StructTreeRoot: missing",
-                custom_severity=Severity.CRITICAL,
+                message="Document contains interactive elements but is untagged; assistive technologies cannot parse semantic roles or names (SC 4.1.2).",
+                evidence="Interactive elements present in untagged document.",
+                custom_severity=Severity.HIGH,
                 custom_remediation="Tag the document to provide semantic roles to assistive technology."
             )]
 
-        if not doc.allows_extraction:
-            return [self.create_result(
-                status=CheckStatus.FAIL,
-                message="Security permissions restrict assistive technology from accessing document content (SC 4.1.2).",
-                evidence="Accessibility content extraction bit is disabled.",
-                custom_severity=Severity.CRITICAL,
-                custom_remediation="Enable accessibility extraction permissions in PDF security settings."
-            )]
+        has_interactive = bool(doc.links or doc.form_fields or doc.annotations or doc.role_map)
+        all_nodes = [n for n in doc.structure_tree.find_all_nodes() if n.tag != "StructTreeRoot"] if doc.structure_tree else []
 
-        # Check for unmapped custom roles or circular role mapping (SC 4.1.2)
-        all_nodes = [n for n in doc.structure_tree.find_all_nodes() if n.tag != "StructTreeRoot"]
-        unmapped_roles = []
-        circular_roles = []
-
-        for node in all_nodes:
-            std_role, is_mapped, is_circ = resolve_role(node.tag, doc.role_map)
-            if is_circ:
-                circular_roles.append(node.tag)
-            elif std_role not in STANDARD_STRUCTURE_TYPES_EXACT:
-                unmapped_roles.append(node.tag)
+        # Check for unmapped custom structure types in the structure tree
+        unmapped_roles = set()
+        circular_roles = set()
+        if doc.structure_tree:
+            for node in all_nodes:
+                std_role, is_mapped, is_circ = resolve_role(node.tag, doc.role_map)
+                if is_circ:
+                    circular_roles.add(node.tag)
+                elif std_role not in STANDARD_STRUCTURE_TYPES_EXACT:
+                    unmapped_roles.add(node.tag)
 
         if circular_roles:
-            return [self.create_result(
+            results.append(self.create_result(
                 status=CheckStatus.FAIL,
-                message=f"Circular role mapping detected in structure tree ({set(circular_roles)}) (SC 4.1.2).",
-                evidence=f"Circular custom tags: {set(circular_roles)}",
+                message=f"Circular role mapping detected in structure tree ({circular_roles}) (SC 4.1.2).",
+                evidence=f"Circular custom tags: {circular_roles}",
                 custom_severity=Severity.HIGH,
                 custom_remediation="Edit Role Map to break circular references."
-            )]
+            ))
 
         if unmapped_roles:
-            return [self.create_result(
+            results.append(self.create_result(
                 status=CheckStatus.WARNING,
-                message=f"Non-standard structure types {set(unmapped_roles)} are not mapped to standard ISO 32000-1 types (SC 4.1.2).",
-                evidence=f"Unmapped tags: {set(unmapped_roles)}",
+                message=f"Non-standard structure type(s) {unmapped_roles} are not mapped to standard ISO 32000-1 types (SC 4.1.2).",
+                evidence=f"Unmapped tags: {unmapped_roles}",
                 custom_severity=Severity.MEDIUM,
                 custom_remediation="Map all custom tags to standard ISO structure types in Role Map."
-            )]
+            ))
 
-        # Check for questionable semantic role mappings (e.g. mapping inline/artifact concepts to grouping containers)
+        # Check custom role mappings in RoleMap
         questionable_mappings = []
         for custom_tag, std_tag in doc.role_map.items():
+            std_role, is_mapped, is_circ = resolve_role(custom_tag, doc.role_map)
             c_lower = custom_tag.lower()
-            if ("artifact" in c_lower or "inline" in c_lower) and std_tag in ("Sect", "Part", "Document", "Art"):
+            std_clean = str(std_tag).strip("/ ")
+            if ("artifact" in c_lower or "inline" in c_lower) and std_clean in ("Sect", "Part", "Document", "Art"):
                 questionable_mappings.append(f"{custom_tag} -> {std_tag}")
+            elif not is_circ and std_role in STANDARD_STRUCTURE_TYPES_EXACT:
+                results.append(self.create_result(
+                    status=CheckStatus.PASS,
+                    message=f"Custom role '{custom_tag}' correctly resolves to standard role '{std_role}' (SC 4.1.2).",
+                    evidence=f"RoleMap: {custom_tag} -> {std_role}"
+                ))
 
         if questionable_mappings:
             results.append(self.create_result(
@@ -519,22 +573,61 @@ class WCAGCompatibleRule(BaseRule):
                 custom_remediation="Remap inline custom tags to <Span> or appropriate inline standard structure types instead of <Sect>."
             ))
 
+        # Check interactive links for programmatic accessible name and role
+        for l in doc.links:
+            has_name = bool(l.text and l.text.strip()) or bool(l.alt_text and l.alt_text.strip())
+            if has_name:
+                results.append(self.create_result(
+                    status=CheckStatus.PASS,
+                    message=f"Link component on page {l.page} provides accessible name '{l.text.strip()[:60]}' (SC 4.1.2).",
+                    evidence=f"Link: '{l.text.strip()[:60]}', Target: {l.uri}",
+                    page=l.page,
+                    bounding_box=l.bbox
+                ))
+            else:
+                results.append(self.create_result(
+                    status=CheckStatus.FAIL,
+                    message=f"Link component on page {l.page} lacks an accessible name (SC 4.1.2).",
+                    evidence=f"Link on page {l.page} has empty text and no alt text.",
+                    page=l.page,
+                    bounding_box=l.bbox,
+                    custom_remediation="Provide descriptive anchor text or alternative description for the link."
+                ))
+
+        # Check interactive form fields for accessible name and standard field role
+        for f in doc.form_fields:
+            has_name = bool(f.tooltip and f.tooltip.strip()) or bool(f.label and f.label.strip()) or bool(f.name and f.name.strip())
+            if has_name and f.field_type:
+                results.append(self.create_result(
+                    status=CheckStatus.PASS,
+                    message=f"Form control '{f.name}' on page {f.page} provides accessible name and role '{f.field_type}' (SC 4.1.2).",
+                    evidence=f"Control: '{f.name}', Role: {f.field_type}, Tooltip: '{f.tooltip}'",
+                    page=f.page,
+                    bounding_box=f.bbox,
+                    object_reference=f"FormField '{f.name}'"
+                ))
+            else:
+                results.append(self.create_result(
+                    status=CheckStatus.FAIL,
+                    message=f"Form control '{f.name}' on page {f.page} lacks accessible name or role definition (SC 4.1.2).",
+                    evidence=f"Control: '{f.name}', Type: {f.field_type}",
+                    page=f.page,
+                    bounding_box=f.bbox,
+                    object_reference=f"FormField '{f.name}'",
+                    custom_remediation="Provide accessible tooltip/label and assign standard widget role."
+                ))
+
         # Check untagged interactive annotations (links/widgets)
         untagged_annots = [a for a in doc.annotations if not a.is_tagged and a.subtype in ("Link", "Widget")]
         if untagged_annots:
-            results.append(self.create_result(
-                status=CheckStatus.WARNING,
-                message=f"{len(untagged_annots)} interactive annotation(s) are not associated with structure tags (SC 4.1.2).",
-                evidence=f"Untagged annotations on pages: {[a.page for a in untagged_annots[:5]]}",
-                custom_severity=Severity.MEDIUM,
-                custom_remediation="Associate interactive annotations with structure elements in the structure tree."
-            ))
-
-        if not results:
-            results.append(self.create_result(
-                status=CheckStatus.PASS,
-                message="Document structural semantics, role mappings, and interactive controls conform to SC 4.1.2 compatibility requirements.",
-                evidence=f"Validated {len(all_nodes)} structure element(s) and role mappings."
-            ))
+            for a in untagged_annots:
+                results.append(self.create_result(
+                    status=CheckStatus.WARNING,
+                    message=f"Interactive annotation on page {a.page} is not associated with structure tags (SC 4.1.2).",
+                    evidence=f"Annotation {a.id} on page {a.page}",
+                    page=a.page,
+                    custom_severity=Severity.MEDIUM,
+                    custom_remediation="Associate interactive annotations with structure elements in the structure tree."
+                ))
 
         return results

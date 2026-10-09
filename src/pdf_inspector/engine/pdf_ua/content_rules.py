@@ -192,17 +192,28 @@ class StructureMCIDExistenceRule(BaseRule):
         for node in doc.structure_tree.find_all_nodes():
             if not node.mcids:
                 continue
-            pg_num = node.page
-            if not pg_num:
-                continue
-            
-            page = next((p for p in doc.pages if p.page_number == pg_num), None)
-            if not page:
-                continue
-                
-            for mcid in node.mcids:
-                if mcid not in page.mcids:
-                    invalid_refs.append((node, mcid, pg_num))
+
+            entries = getattr(node, "mcid_entries", [])
+            if entries:
+                for mcid, explicit_pg in entries:
+                    pg_num = explicit_pg or node.page
+                    if not pg_num:
+                        continue
+                    page = next((p for p in doc.pages if p.page_number == pg_num), None)
+                    if not page:
+                        continue
+                    if mcid not in page.mcids:
+                        invalid_refs.append((node, mcid, pg_num))
+            else:
+                pg_num = node.page
+                if not pg_num:
+                    continue
+                page = next((p for p in doc.pages if p.page_number == pg_num), None)
+                if not page:
+                    continue
+                for mcid in node.mcids:
+                    if mcid not in page.mcids:
+                        invalid_refs.append((node, mcid, pg_num))
                     
         if invalid_refs:
             for node, mcid, pg_num in invalid_refs[:5]:

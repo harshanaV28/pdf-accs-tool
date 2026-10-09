@@ -144,23 +144,34 @@ class DocumentParser:
                     meta_str = meta_bytes.decode("utf-8", errors="ignore")
 
                     # Dublin Core Title (<dc:title>)
-                    m_title = re.search(r"<dc:title>.*?<rdf:li[^>]*>(.*?)</rdf:li>", meta_str, re.DOTALL | re.IGNORECASE)
-                    if m_title:
-                        xmp_dc_title = m_title.group(1).strip()
-                    else:
-                        m_title_direct = re.search(r"<dc:title>(.*?)</dc:title>", meta_str, re.DOTALL | re.IGNORECASE)
-                        if m_title_direct and "<rdf:li" not in m_title_direct.group(1):
-                            xmp_dc_title = m_title_direct.group(1).strip()
+                    m_title_block = re.search(r"<dc:title\b[^>]*>(.*?)</dc:title>", meta_str, re.DOTALL | re.IGNORECASE)
+                    if m_title_block:
+                        block = m_title_block.group(1)
+                        m_li = re.search(r"<rdf:li\b[^>]*>(.*?)</rdf:li>", block, re.DOTALL | re.IGNORECASE)
+                        if m_li and m_li.group(1).strip():
+                            xmp_dc_title = m_li.group(1).strip()
+                        elif "<rdf:" not in block and block.strip():
+                            xmp_dc_title = block.strip()
 
-                    # Dublin Core Creator
-                    m_creator = re.search(r"<dc:creator>.*?<rdf:li[^>]*>(.*?)</rdf:li>", meta_str, re.DOTALL | re.IGNORECASE)
-                    if m_creator:
-                        xmp_dc_creator = m_creator.group(1).strip()
+                    # Dublin Core Creator (<dc:creator>)
+                    m_creator_block = re.search(r"<dc:creator\b[^>]*>(.*?)</dc:creator>", meta_str, re.DOTALL | re.IGNORECASE)
+                    if m_creator_block:
+                        block = m_creator_block.group(1)
+                        m_li = re.search(r"<rdf:li\b[^>]*>(.*?)</rdf:li>", block, re.DOTALL | re.IGNORECASE)
+                        if m_li and m_li.group(1).strip():
+                            xmp_dc_creator = m_li.group(1).strip()
+                        elif "<rdf:" not in block and block.strip():
+                            xmp_dc_creator = block.strip()
 
-                    # Dublin Core Description
-                    m_desc = re.search(r"<dc:description>.*?<rdf:li[^>]*>(.*?)</rdf:li>", meta_str, re.DOTALL | re.IGNORECASE)
-                    if m_desc:
-                        xmp_dc_description = m_desc.group(1).strip()
+                    # Dublin Core Description (<dc:description>)
+                    m_desc_block = re.search(r"<dc:description\b[^>]*>(.*?)</dc:description>", meta_str, re.DOTALL | re.IGNORECASE)
+                    if m_desc_block:
+                        block = m_desc_block.group(1)
+                        m_li = re.search(r"<rdf:li\b[^>]*>(.*?)</rdf:li>", block, re.DOTALL | re.IGNORECASE)
+                        if m_li and m_li.group(1).strip():
+                            xmp_dc_description = m_li.group(1).strip()
+                        elif "<rdf:" not in block and block.strip():
+                            xmp_dc_description = block.strip()
 
                     # PDF/UA Identification (pdfuaid:part)
                     m_part = re.search(r"<pdfuaid:part>(\d+)</pdfuaid:part>", meta_str, re.IGNORECASE)
@@ -317,7 +328,7 @@ class DocumentParser:
                                             is_inside_tagged=False
                                         ))
                                 else:
-                                    if in_art:
+                                    if in_art and mcid is not None:
                                         tagged_in_art_count += 1
                                         page_content_occs.append(ContentOccurrenceModel(
                                             page_number=page_idx,
@@ -354,9 +365,6 @@ class DocumentParser:
                                             page_number=page_idx,
                                             is_inside_tagged=False
                                         ))
-                                else:
-                                    if in_art:
-                                        tagged_in_art_count += 1
 
                                 stack.append({"tag": tag, "mcid": None, "is_artifact": is_art})
 
@@ -811,9 +819,15 @@ class DocumentParser:
             td_count = len(td_nodes)
             cols_count = max((len(tr.find_all_by_standard_tag("TH")) + len(tr.find_all_by_standard_tag("TD"))) for tr in tr_nodes) if tr_nodes else 0
 
+            page_val = t_node.page
+            if page_val is None and t_node.pages_spanned:
+                page_val = t_node.pages_spanned[0]
+            if page_val is None:
+                page_val = 1
+
             tables.append(TableModel(
                 id=f"table_{idx + 1}",
-                page=t_node.page or 1,
+                page=page_val,
                 rows_count=rows_count,
                 cols_count=cols_count,
                 has_headers=th_count > 0,
@@ -837,16 +851,28 @@ class DocumentParser:
             li_nodes = [c for c in l_node.children if c.standard_tag.upper() == "LI"]
             has_labels = False
             # Check Matterhorn Checkpoint 28-001: All direct children of L must be LI or Caption
-            is_valid = len(l_node.children) > 0 and all(c.standard_tag.upper() in ("LI", "CAPTION") for c in l_node.children)
+            is_valid_l = len(l_node.children) > 0 and all(c.standard_tag.upper() in ("LI", "CAPTION") for c in l_node.children)
 
+            # Check Matterhorn Checkpoint 28-002: All direct children of LI must be Lbl and/or LBody
+            is_valid_li = True
             for li in li_nodes:
                 child_tags = [c.standard_tag.upper() for c in li.children]
                 if "LBL" in child_tags:
                     has_labels = True
+                if not (len(li.children) > 0 and all(t in ("LBL", "LBODY", "CAPTION") for t in child_tags)):
+                    is_valid_li = False
+
+            is_valid = is_valid_l and is_valid_li
+
+            page_val = l_node.page
+            if page_val is None and l_node.pages_spanned:
+                page_val = l_node.pages_spanned[0]
+            if page_val is None:
+                page_val = 1
 
             lists.append(ListModel(
                 id=f"list_{idx + 1}",
-                page=l_node.page or 1,
+                page=page_val,
                 items_count=len(li_nodes),
                 is_valid_structure=is_valid,
                 has_labels=has_labels,
@@ -893,7 +919,7 @@ class DocumentParser:
         return links
 
     def _extract_form_fields(self, fitz_doc: pymupdf.Document, pike_doc: pikepdf.Pdf) -> List[FormFieldModel]:
-        """Extracts interactive form fields and checks accessible tooltips /TU."""
+        """Extracts interactive form fields and checks accessible tooltips /TU, including inherited attributes."""
         fields: List[FormFieldModel] = []
         for page_idx in range(len(fitz_doc)):
             page = fitz_doc[page_idx]
@@ -911,6 +937,13 @@ class DocumentParser:
                             annot_obj = pike_doc.objects[w.xref]
                             if "/TU" in annot_obj:
                                 tooltip = str(annot_obj["/TU"]).strip()
+                            elif "/Parent" in annot_obj:
+                                curr = annot_obj["/Parent"]
+                                while curr is not None:
+                                    if "/TU" in curr:
+                                        tooltip = str(curr["/TU"]).strip()
+                                        break
+                                    curr = curr.get("/Parent", None)
                     except Exception:
                         pass
 
