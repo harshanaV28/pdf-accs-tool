@@ -58,25 +58,40 @@ class ContentTaggedRule(BaseRule):
                 unmarked_pages[p.page_number] = snippets
 
         if unmarked_pages:
-            for pg_num, snippets in list(unmarked_pages.items())[:5]:
+            for pg_num, snippets in list(unmarked_pages.items())[:10]:
                 snip_str = f" Content: \"{snippets[0]}\"" if snippets else ""
+                # Find page bounding box if available
+                p_model = next((p for p in doc.pages if p.page_number == pg_num), None)
+                unmarked_bbox = None
+                if p_model and p_model.content_occurrences:
+                    for occ in p_model.content_occurrences:
+                        if occ.is_unmarked_real_content and occ.bbox:
+                            unmarked_bbox = occ.bbox
+                            break
+
                 results.append(self.create_result(
                     status=CheckStatus.FAIL,
                     message=f"Page {pg_num} contains real content that is neither enclosed in marked content (/MCID) nor marked as an Artifact.",
-                    evidence=f"Unmarked content on page {pg_num}.{snip_str}",
+                    evidence=f"Unmarked real content on page {pg_num}.{snip_str}",
                     page=pg_num,
+                    bounding_box=unmarked_bbox,
+                    object_reference=f"Untagged Content on Page {pg_num}",
                     custom_severity=Severity.HIGH,
-                    custom_remediation="Tag the unmarked content in the logical structure tree or mark it as an Artifact."
+                    custom_remediation="Tag the unmarked content in the logical structure tree or mark it as an Artifact.",
+                    items_count=1
                 ))
-            if len(unmarked_pages) > 5:
-                rem = len(unmarked_pages) - 5
+            if len(unmarked_pages) > 10:
+                rem = len(unmarked_pages) - 10
                 results.append(self.create_result(
                     status=CheckStatus.FAIL,
                     message=f"{rem} additional page(s) contain unmarked real content.",
                     evidence=f"Total pages with unmarked content: {len(unmarked_pages)}",
+                    page=list(unmarked_pages.keys())[10],
                     custom_severity=Severity.HIGH,
-                    custom_remediation="Review and tag untagged content across pages."
+                    custom_remediation="Review and tag untagged content across pages.",
+                    items_count=rem
                 ))
+
         else:
             results.append(self.create_result(
                 status=CheckStatus.PASS,

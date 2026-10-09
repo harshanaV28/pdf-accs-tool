@@ -161,7 +161,9 @@ class MainWindow(QMainWindow):
         self.center_stack.addWidget(self.detailed_view)  # 2
 
         self.pdf_viewer = PDFCanvas()
+        self.pdf_viewer.finding_navigation_requested.connect(self._on_finding_navigate)
         self.center_stack.addWidget(self.pdf_viewer)  # 3
+
 
         self.tag_tree_view = TagTreeView()
         self.tag_tree_view.tag_selected.connect(self._on_tag_tree_selected)
@@ -474,27 +476,49 @@ class MainWindow(QMainWindow):
         self.right_panel.display_finding(finding)
 
     def _on_finding_double_clicked(self, finding: CheckResult):
-        """User double clicked a finding; jump directly to page and highlight."""
+        """User double clicked a finding; jump directly to page and highlight in PAC Visual Locator."""
         self.right_panel.display_finding(finding)
-        if finding.page:
-            self.sidebar.select_page("PDF Viewer")
-            self.pdf_viewer.go_to_page(finding.page, finding.bounding_box)
+        self.sidebar.select_page("PDF Viewer")
+        target_page = finding.page or 1
+        self.pdf_viewer.go_to_page(target_page, finding.bounding_box, finding=finding, doc_model=self.current_doc)
 
     def _on_highlight_requested(self, page: int, bbox):
-        """User clicked [Highlight on Page] button in Right Panel."""
+        """User clicked [Highlight on Page] button in Right Panel; display in PAC Visual Locator."""
         self.sidebar.select_page("PDF Viewer")
-        self.pdf_viewer.go_to_page(page, bbox)
+        finding = self.right_panel.current_finding
+        target_page = page or (finding.page if finding else 1) or 1
+        self.pdf_viewer.go_to_page(target_page, bbox, finding=finding, doc_model=self.current_doc)
+
+    def _on_finding_navigate(self, offset: int):
+        """Cycle to previous or next finding in PAC visual locator."""
+        if not self.current_report or not self.current_report.results:
+            return
+        results = [r for r in self.current_report.results if r.status.is_problem or r.page is not None]
+        if not results:
+            results = self.current_report.results
+
+        current = self.pdf_viewer.current_finding
+        idx = 0
+        if current in results:
+            idx = results.index(current)
+        new_idx = (idx + offset) % len(results)
+        next_finding = results[new_idx]
+
+        self.right_panel.display_finding(next_finding)
+        target_page = next_finding.page or 1
+        self.pdf_viewer.go_to_page(target_page, next_finding.bounding_box, finding=next_finding, doc_model=self.current_doc)
 
     def _on_tag_tree_selected(self, node):
         """User selected a node in the structure tag tree."""
         if node.page:
-            self.pdf_viewer.go_to_page(node.page, node.bbox)
+            self.pdf_viewer.go_to_page(node.page, node.bbox, doc_model=self.current_doc)
 
     def _on_element_jump_requested(self, page: int, bbox=None):
         """User double clicked an element in Elements view; navigate and illuminate."""
         if page:
             self.sidebar.select_page("PDF Viewer")
-            self.pdf_viewer.go_to_page(page, bbox)
+            self.pdf_viewer.go_to_page(page, bbox, doc_model=self.current_doc)
+
 
     def action_export_report(self):
         if not self.current_report or not self.current_doc:

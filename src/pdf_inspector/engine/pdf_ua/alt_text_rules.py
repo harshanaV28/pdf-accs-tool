@@ -1,9 +1,10 @@
 """
 Alternative Descriptions Rules (ISO 14289-1, Clause 7.18)
 Verifies that Figures, Formulas, and other graphical elements have meaningful alternative descriptions.
+Matches PAC (PDF Accessibility Checker) visual inspection patterns and error messaging.
 """
 
-from typing import List
+from typing import List, Tuple, Optional
 import re
 from ..rule_base import BaseRule
 from ...core.models import PDFDocumentModel, CheckResult, CheckStatus, Severity
@@ -20,7 +21,7 @@ class FigureAlternativeTextRule(BaseRule):
     standard = "PDF/UA"
     severity = Severity.HIGH
     description = "Every Figure and Formula element must possess an alternative description (/Alt) or /ActualText (ISO 14289-1, Clause 7.18)."
-    remediation_template = "In Acrobat Pro, right-click Figure tag > Properties > Tag tab > Alternative Text, and enter a descriptive alternative."
+    remediation_template = "In Acrobat Pro, right-click Figure/Formula tag > Properties > Tag tab > Alternative Text, and enter a descriptive alternative."
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
         results = []
@@ -54,39 +55,44 @@ class FigureAlternativeTextRule(BaseRule):
             if page is None and node.pages_spanned:
                 page = node.pages_spanned[0]
             page = page or 1
-            bbox = node.bbox
+
+            # Bounding box resolution
+            bbox = self._resolve_node_bbox(node, doc, page)
+
+            tag_label = "Formula" if node.standard_tag.upper() == "FORMULA" else "Figure"
 
             if not alt:
-                missing_alt.append((node.tag, page, bbox, node.id))
+                missing_alt.append((tag_label, page, bbox, node.id, node.text_content))
             elif FILENAME_PATTERN.match(alt) or PLACEHOLDER_PATTERN.match(alt) or len(alt) <= 2:
-                placeholder_alt.append((node.tag, alt, page, bbox, node.id))
+                placeholder_alt.append((tag_label, alt, page, bbox, node.id, node.text_content))
 
         # Check for untagged images
         untagged_images = [img for img in doc.images if not img.is_artifact and not img.has_alt]
 
         if missing_alt:
-            for tag, pg, bbox, nid in missing_alt:
+            for tag_label, pg, bbox, nid, txt in missing_alt:
+                snip_str = f" Content: \"{txt[:40]}\"" if txt else ""
                 results.append(self.create_result(
                     status=CheckStatus.FAIL,
-                    message=f"<{tag}> element lacks an alternative description (/Alt).",
-                    evidence=f"<{tag}> on page {pg} has no /Alt or /ActualText.",
+                    message=f'Alternative text missing for "{tag_label}" structure element',
+                    evidence=f'<{tag_label}> on page {pg} lacks alternative text (/Alt).{snip_str}',
                     page=pg,
                     bounding_box=bbox,
-                    object_reference=f"<{tag} id='{nid}'>",
+                    object_reference=f"<{tag_label} id='{nid}'>",
                     custom_severity=Severity.HIGH,
-                    custom_remediation="Add an informative alternative description describing the visual content of the figure.",
+                    custom_remediation=f"Add an informative alternative description describing the {tag_label.lower()} in the tag properties.",
                     items_count=1
                 ))
 
         if placeholder_alt:
-            for tag, text, pg, bbox, nid in placeholder_alt:
+            for tag_label, text, pg, bbox, nid, txt in placeholder_alt:
                 results.append(self.create_result(
                     status=CheckStatus.WARNING,
-                    message=f"<{tag}> has suspicious placeholder or filename alternative text: '{text}'.",
+                    message=f'Alternative text for "{tag_label}" is suspicious or placeholder: \'{text}\'',
                     evidence=f"Alternative text: '{text}' on page {pg}",
                     page=pg,
                     bounding_box=bbox,
-                    object_reference=f"<{tag} id='{nid}'>",
+                    object_reference=f"<{tag_label} id='{nid}'>",
                     custom_severity=Severity.MEDIUM,
                     custom_remediation="Replace file names or generic placeholders with meaningful descriptive alt text.",
                     items_count=1
@@ -96,7 +102,7 @@ class FigureAlternativeTextRule(BaseRule):
             for img in untagged_images[:5]:
                 results.append(self.create_result(
                     status=CheckStatus.FAIL,
-                    message=f"Image on page {img.page} is not tagged as Figure or marked as Artifact.",
+                    message=f"Image on page {img.page} is not tagged as Figure or marked as Artifact",
                     evidence=f"Image dimensions {img.width}x{img.height} at {img.bbox}",
                     page=img.page,
                     bounding_box=img.bbox,
@@ -116,3 +122,32 @@ class FigureAlternativeTextRule(BaseRule):
             ))
 
         return results
+
+    def _resolve_node_bbox(self, node, doc: PDFDocumentModel, page_num: int) -> Optional[Tuple[float, float, float, float]]:
+        """Finds or computes the bounding box for a structure node."""
+        if node.bbox and len(node.bbox) == 4 and any(c > 0 for c in node.bbox):
+            return node.bbox
+
+        page_height = 792.0
+        if doc.pages and len(doc.pages) >= page_num:
+            page_height = doc.pages[page_num - 1].height
+
+        if node.struct_bbox and len(node.struct_bbox) == 4:
+            sb = node.struct_bbox
+            # If in PDF user coordinates (bottom-up):
+            if sb[1] < page_height and sb[3] <= page_height:
+                return (sb[0], min(page_height - sb[1], page_height - sb[3]), sb[2], max(page_height - sb[1], page_height - sb[3]))
+            return sb
+
+        # Recursive check on children
+        for child in node.children:
+            cb = self._resolve_node_bbox(child, doc, page_num)
+            if cb:
+                return cb
+
+        # Check for matching image on that page
+        for img in doc.images:
+            if img.page == page_num and img.bbox:
+                return img.bbox
+
+        return None

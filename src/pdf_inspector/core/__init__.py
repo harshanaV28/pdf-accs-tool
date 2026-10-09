@@ -8,6 +8,7 @@ from .models import (
 )
 from .document_parser import DocumentParser
 from .structure_tree import StructureTreeParser, resolve_role, STANDARD_STRUCTURE_TYPES
+from .visual_locator import VisualLocatorResolver
 
 __all__ = [
     "CheckStatus",
@@ -26,6 +27,8 @@ __all__ = [
     "ArtifactOccurrenceModel",
     "DocumentParser",
     "StructureTreeParser",
+    "VisualLocatorResolver",
     "resolve_role",
     "STANDARD_STRUCTURE_TYPES",
 ]
+

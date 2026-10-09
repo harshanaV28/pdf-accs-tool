@@ -18,8 +18,10 @@ class FindingDetailsPanel(QWidget):
     """Inspector panel displaying rule evidence, explanation, and remediation."""
 
     highlight_requested = Signal(int, object)  # (page_num, bbox)
+    finding_highlight_requested = Signal(object)  # (CheckResult)
 
     def __init__(self, parent=None):
+
         super().__init__(parent)
         self.current_finding: Optional[CheckResult] = None
         self._init_ui()
@@ -199,18 +201,35 @@ class FindingDetailsPanel(QWidget):
 
         self.id_label.setText(f"Rule ID: {finding.check_id}")
         self.standard_label.setText(f"Standard: {finding.standard} ({finding.category})")
-        self.page_label.setText(f"Page: {finding.page if finding.page else 'Document-wide'}")
+        self.page_label.setText(f"Page: {finding.page if finding.page else 'Page 1 (Document-level)'}")
         self.object_label.setText(f"Target: {finding.object_reference or 'Document'}")
 
-        self.txt_explanation.setPlainText(
-            f"{finding.message}\n\n{finding.description}"
-        )
-        self.txt_evidence.setPlainText(finding.evidence or "No direct technical string evidence.")
-        self.txt_remediation.setPlainText(finding.remediation or "Review standard accessibility guidelines.")
+        # Rich, exhaustive explanation stating the exact issue
+        explanation_text = f"Issue: {finding.message}\n\nStandard Requirement:\n{finding.description or 'Must conform to PDF/UA ISO 14289-1 and WCAG 2.1 accessibility guidelines.'}"
+        if finding.page:
+            explanation_text += f"\n\nLocation: Page {finding.page}"
+        if finding.object_reference:
+            explanation_text += f" (Element: {finding.object_reference})"
 
-        can_highlight = finding.page is not None
-        self.btn_highlight.setEnabled(can_highlight)
+        self.txt_explanation.setPlainText(explanation_text)
+
+        # Technical Evidence
+        evidence_text = finding.evidence or "Document structural property or syntax validation."
+        if finding.bounding_box:
+            evidence_text += f"\nBounding Box: [{', '.join(f'{v:.1f}' for v in finding.bounding_box)}]"
+        self.txt_evidence.setPlainText(evidence_text)
+
+        # Remediation Advice
+        remediation_text = finding.remediation or "Inspect tag properties in Adobe Acrobat Pro or source authoring application to resolve accessibility violation."
+        self.txt_remediation.setPlainText(remediation_text)
+
+        # Highlight on Page enabled for all findings
+        self.btn_highlight.setEnabled(True)
 
     def _on_highlight_clicked(self):
-        if self.current_finding and self.current_finding.page:
-            self.highlight_requested.emit(self.current_finding.page, self.current_finding.bounding_box)
+        if self.current_finding:
+            target_page = self.current_finding.page or 1
+            self.highlight_requested.emit(target_page, self.current_finding.bounding_box)
+            self.finding_highlight_requested.emit(self.current_finding)
+
+

@@ -209,12 +209,14 @@ class StructureTreeIntegrityRule(BaseRule):
         # Record FAIL findings
         if invalid_nodes:
             for node, msg, evid, remed in invalid_nodes[:5]:
+                pg = node.page or (node.pages_spanned[0] if node.pages_spanned else 1)
                 results.append(self.create_result(
                     status=CheckStatus.FAIL,
                     message=msg,
                     evidence=evid,
-                    page=node.page or 1,
-                    object_reference=f"<{node.tag}>",
+                    page=pg,
+                    bounding_box=node.bbox,
+                    object_reference=f"<{node.tag} id='{node.id}'>",
                     custom_severity=Severity.HIGH,
                     custom_remediation=remed,
                     items_count=1
@@ -233,12 +235,14 @@ class StructureTreeIntegrityRule(BaseRule):
         # Record WARNING findings
         if warned_nodes:
             for node, msg, evid, remed in warned_nodes[:5]:
+                pg = node.page or (node.pages_spanned[0] if node.pages_spanned else 1)
                 results.append(self.create_result(
                     status=CheckStatus.WARNING,
                     message=msg,
                     evidence=evid,
-                    page=node.page or 1,
-                    object_reference=f"<{node.tag}>",
+                    page=pg,
+                    bounding_box=node.bbox,
+                    object_reference=f"<{node.tag} id='{node.id}'>",
                     custom_severity=Severity.LOW,
                     custom_remediation=remed,
                     items_count=1
@@ -253,6 +257,7 @@ class StructureTreeIntegrityRule(BaseRule):
                     custom_remediation="Review structure tree tags in Acrobat Pro Tag Tree.",
                     items_count=rem_warn
                 ))
+
 
         passed_count = max(0, total_tags - len(invalid_nodes) - len(warned_nodes))
         if passed_count > 0:
@@ -396,12 +401,14 @@ class StructureNestingRule(BaseRule):
         # Record FAIL findings
         if invalid_nodes:
             for node, msg, evid, remed in invalid_nodes[:5]:
+                pg = node.page or (node.pages_spanned[0] if node.pages_spanned else 1)
                 results.append(self.create_result(
                     status=CheckStatus.FAIL,
                     message=msg,
                     evidence=evid,
-                    page=node.page or 1,
-                    object_reference=f"<{node.tag}>",
+                    page=pg,
+                    bounding_box=node.bbox,
+                    object_reference=f"<{node.tag} id='{node.id}'>",
                     custom_severity=Severity.HIGH,
                     custom_remediation=remed,
                     items_count=1
@@ -467,20 +474,22 @@ class EmptyStructureElementsRule(BaseRule):
                 or (node.text_content and node.text_content.strip())
             )
             if std_role in ("P", "H1", "H2", "H3", "H4", "H5", "H6", "Span", "Link") and not node.children and not node.mcids and not has_text_payload:
-                leaf_empty.append((node.tag, node.page or 1))
+                leaf_empty.append((node, node.page or 1))
 
         if leaf_empty:
-            for tag, pg in leaf_empty[:5]:
+            for node, pg in leaf_empty[:5]:
                 results.append(self.create_result(
                     status=CheckStatus.FAIL,
-                    message=f"Empty structure element <{tag}> has no child tags or marked content (Matterhorn 13-005).",
-                    evidence=f"<{tag}> on page {pg} is empty.",
+                    message=f"Empty structure element <{node.tag}> has no child tags or marked content (Matterhorn 13-005).",
+                    evidence=f"<{node.tag}> on page {pg} is empty.",
                     page=pg,
-                    object_reference=f"<{tag}>",
+                    bounding_box=node.bbox,
+                    object_reference=f"<{node.tag} id='{node.id}'>",
                     custom_severity=Severity.HIGH,
                     custom_remediation="Remove empty tags in the tag tree or assign content to them.",
                     items_count=1
                 ))
+
             if len(leaf_empty) > 5:
                 rem = len(leaf_empty) - 5
                 results.append(self.create_result(
