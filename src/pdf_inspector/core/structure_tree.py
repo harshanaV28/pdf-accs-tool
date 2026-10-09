@@ -8,7 +8,7 @@ Links real page MCID text and geometry to structural nodes.
 from typing import Dict, List, Optional, Tuple, Set, Any
 import logging
 import pikepdf
-from .models import StructureNode
+from .models import StructureNode, validate_bbox_coordinates
 
 logger = logging.getLogger(__name__)
 
@@ -246,17 +246,16 @@ class StructureTreeParser:
                                 # Empty array represents unspecified BBox; do not record as explicit/malformed
                                 pass
                             else:
-                                try:
-                                    import math
-                                    parsed_bbox = [float(x) for x in v]
-                                    attrs[k_str] = parsed_bbox
-                                    if len(parsed_bbox) == 4 and all(math.isfinite(x) for x in parsed_bbox):
-                                        struct_bbox = (parsed_bbox[0], parsed_bbox[1], parsed_bbox[2], parsed_bbox[3])
-                                        has_explicit_bbox = True
-                                    else:
-                                        has_explicit_bbox = True
-                                except Exception:
-                                    attrs[k_str] = [str(x) for x in v]
+                                is_valid, parsed_bbox = validate_bbox_coordinates(v)
+                                if is_valid and parsed_bbox is not None:
+                                    attrs[k_str] = list(parsed_bbox)
+                                    struct_bbox = parsed_bbox
+                                    has_explicit_bbox = True
+                                else:
+                                    try:
+                                        attrs[k_str] = [float(x) for x in v]
+                                    except Exception:
+                                        attrs[k_str] = [str(x) for x in v]
                                     has_explicit_bbox = True
                         else:
                             attrs[k_str] = str(v)

@@ -12,6 +12,7 @@ PDF Accessibility Inspector implements automated checks and manual inspection wo
 
 | Rule ID | Category | Matterhorn Checkpoint | ISO 14289-1 Clause | Rule Summary & Evaluation Logic |
 |---|---|---|---|---|
+| `PDFUA-SYNTAX-001` | PDF Syntax (ISO 32000-1) | 01-001 | 7.1, 7.5.2, 7.6 | Validates ISO 32000-1 specification header version (1.0-2.0) and unhindered accessibility extraction permissions under security settings. |
 | `PDFUA-CONTENT-001` | Content | 01-001 | 7.1 | Catalog `/MarkInfo /Marked` must be true and `/StructTreeRoot` must exist. |
 | `PDFUA-CONTENT-002` | Content | 01-002, 01-005 | 7.1 | All real content operations (text `Tj`/`TJ`, paths `S`/`f`/`B`, XObjects `Do`) must be enclosed in marked content sequences (`/MCID`) or marked as `/Artifact`. |
 | `PDFUA-ART-003` | Content | 01-003 | 7.1 | Content marked as an Artifact must not be nested inside tagged content sequences. |

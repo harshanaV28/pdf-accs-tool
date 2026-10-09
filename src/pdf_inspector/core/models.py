@@ -32,6 +32,38 @@ class Severity(str, Enum):
     INFO = "INFO"
 
 
+def validate_bbox_coordinates(val: Any) -> Tuple[bool, Optional[Tuple[float, float, float, float]]]:
+    """
+    Validates and converts a bounding box attribute.
+    Returns (is_valid, parsed_bbox_tuple).
+    - Accepts integers, floats, decimal.Decimal, and pikepdf numeric types.
+    - Requires exactly four numeric coordinates.
+    - Rejects non-numeric strings/objects, NaN, and positive/negative infinity.
+    - Preserves legitimate zero and negative coordinates.
+    - Returns (False, None) for malformed, non-4-length, non-numeric, or non-finite coordinates.
+    """
+    if val is None or isinstance(val, (str, bytes, dict)):
+        return False, None
+    if not isinstance(val, (list, tuple)) and not hasattr(val, "__iter__"):
+        return False, None
+    try:
+        if len(val) != 4:
+            return False, None
+        import math
+        coords = []
+        for x in val:
+            if isinstance(x, (bool, bytes, str, dict, list)):
+                return False, None
+            f_val = float(x)
+            if not math.isfinite(f_val):
+                return False, None
+            coords.append(f_val)
+        return True, (coords[0], coords[1], coords[2], coords[3])
+    except Exception:
+        return False, None
+
+
+
 @dataclass
 class CheckResult:
     """Standardized finding result for any automated or manual rule."""
