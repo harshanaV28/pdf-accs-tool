@@ -154,16 +154,29 @@ class FindingDetailsPanel(QWidget):
         elif w > 0:
             self.status_badge.setStatus(CheckStatus.WARNING)
             self.severity_badge.setSeverity(Severity.MEDIUM)
-        else:
+        elif p > 0:
             self.status_badge.setStatus(CheckStatus.PASS)
+            self.severity_badge.setSeverity(Severity.INFO)
+        else:
+            self.status_badge.setStatus(CheckStatus.NOT_APPLICABLE)
             self.severity_badge.setSeverity(Severity.INFO)
 
         self.id_label.setText(f"Checkpoint: {category}")
         self.standard_label.setText(f"Standard: {standard}")
-        self.page_label.setText(f"Passed: {p} | Warned: {w} | Failed: {f}")
-        self.object_label.setText(f"Total Evaluated: {p + w + f}")
+        if p == 0 and w == 0 and f == 0:
+            self.page_label.setText("Status: Not Applicable (⊘)")
+            self.object_label.setText("Total Evaluated: 0")
+        else:
+            self.page_label.setText(f"Passed: {p} | Warned: {w} | Failed: {f}")
+            self.object_label.setText(f"Total Evaluated: {p + w + f}")
 
-        if f == 0 and w == 0:
+        if p == 0 and w == 0 and f == 0:
+            self.txt_explanation.setPlainText(
+                f"Checkpoint '{category}' is not applicable to this document, or contains no machine-testable objects in this PDF."
+            )
+            self.txt_evidence.setPlainText("No applicable objects found (⊘).")
+            self.txt_remediation.setPlainText("No action required. This checkpoint does not apply or contains no evaluable elements.")
+        elif f == 0 and w == 0:
             self.txt_explanation.setPlainText(
                 f"All checks for '{category}' passed successfully according to {standard} requirements."
             )

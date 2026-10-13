@@ -522,6 +522,7 @@ class AuditReport:
             "warned": self.total_warned,
             "failed": self.total_failed,
             "manual": self.total_manual,
+            "not_applicable": self.total_not_applicable,
             "compliance_score": self.compliance_score,
             "findings_count": self.total_findings_count
         }
