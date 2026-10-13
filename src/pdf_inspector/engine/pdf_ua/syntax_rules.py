@@ -190,3 +190,4 @@ class PDFSyntaxBasicRule(BaseRule):
                 ))
 
         return results
+

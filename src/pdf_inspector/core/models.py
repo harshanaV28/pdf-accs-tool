@@ -468,6 +468,30 @@ class AuditReport:
     def get_results_by_standard(self, standard: str) -> List[CheckResult]:
         return [r for r in self.results if r.standard.upper() == standard.upper()]
 
+    def get_category_counts(self, standard: str) -> Dict[str, Dict[str, int]]:
+        """Returns {category_name: {'passed': X, 'warned': Y, 'failed': Z, 'manual': W}}"""
+        counts: Dict[str, Dict[str, int]] = {}
+        if standard.upper() == "PDF/UA":
+            for cat in [
+                "PDF Syntax (ISO 32000-1)", "Fonts", "Content", "Embedded Files",
+                "Natural language", "Structure elements", "Structure tree",
+                "Role mapping", "Alternative Descriptions", "Metadata", "Document settings"
+            ]:
+                counts[cat] = {"passed": 0, "warned": 0, "failed": 0, "manual": 0}
+
+        for r in self.get_results_by_standard(standard):
+            if r.category not in counts:
+                counts[r.category] = {"passed": 0, "warned": 0, "failed": 0, "manual": 0}
+            cnt = r.items_count if (hasattr(r, "items_count") and r.items_count is not None) else 1
+            if r.status == CheckStatus.PASS:
+                counts[r.category]["passed"] += cnt
+            elif r.status == CheckStatus.WARNING:
+                counts[r.category]["warned"] += cnt
+            elif r.status in (CheckStatus.FAIL, CheckStatus.ERROR):
+                counts[r.category]["failed"] += cnt
+            elif r.status == CheckStatus.MANUAL_REVIEW:
+                counts[r.category]["manual"] += cnt
+        return counts
     PAC_PDFUA_CATEGORIES = [
         "PDF Syntax (ISO 32000-1)",
         "Fonts",

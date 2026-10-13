@@ -15,7 +15,7 @@ import pymupdf
 from .models import (
     PDFDocumentModel, PageModel, StructureNode, FontModel,
     ImageModel, TableModel, ListModel, LinkModel, FormFieldModel,
-    AnnotationModel, BookmarkModel, ArtifactOccurrenceModel, FormXObjectModel
+    AnnotationModel, BookmarkModel, ArtifactOccurrenceModel, ContentOccurrenceModel
 )
 from .structure_tree import StructureTreeParser, resolve_role, parse_number_tree
 

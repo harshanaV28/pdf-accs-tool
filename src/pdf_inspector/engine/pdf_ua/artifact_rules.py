@@ -59,6 +59,15 @@ class ArtifactInsideTaggedContentRule(BaseRule):
         results = []
         artifacts = doc.all_artifacts
         if not artifacts:
+<<<<<<< Updated upstream
+=======
+            results.append(self.create_result(
+                status=CheckStatus.PASS,
+                message="No content marked as Artifact is present inside tagged content.",
+                evidence="Artifacts inside tagged content count: 0",
+                items_count=0
+            ))
+>>>>>>> Stashed changes
             return results
 
         invalid_artifacts = [a for a in artifacts if a.is_inside_tagged]
@@ -106,7 +115,7 @@ class ArtifactInsideTaggedContentRule(BaseRule):
                 status=CheckStatus.PASS,
                 message=f"All {len(valid_artifacts)} artifact(s) are correctly placed outside tagged content.",
                 evidence=f"Artifact content validation passed: {len(valid_artifacts)}/{len(artifacts)}",
-                items_count=len(valid_artifacts) if valid_artifacts else 1
+                items_count=len(valid_artifacts)
             ))
 
         return results

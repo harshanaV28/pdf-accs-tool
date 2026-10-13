@@ -48,6 +48,7 @@ class ContentTaggedRule(BaseRule):
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
         results = []
+        total_unmarked = sum(p.unmarked_real_content_count for p in doc.pages) if doc.pages else 0
         if not doc.is_tagged:
             total_untagged = len(doc.images) + sum(len(p.text.splitlines()) for p in doc.pages if p.text.strip())
             if total_untagged > 0:
@@ -61,7 +62,7 @@ class ContentTaggedRule(BaseRule):
                 ))
             return results
 
-        # 1. Check pages with unmarked real content operations
+        # 1. Check pages with unmarked real content operations on tagged documents
         unmarked_pages: Dict[int, List[str]] = {}
         for p in doc.pages:
             unmarked_occs = [occ for occ in p.content_occurrences if occ.is_unmarked_real_content]
@@ -75,6 +76,7 @@ class ContentTaggedRule(BaseRule):
                 # Find page bounding box if available
                 p_model = next((p for p in doc.pages if p.page_number == pg_num), None)
                 unmarked_bbox = None
+                items_on_pg = p_model.unmarked_real_content_count if p_model and p_model.unmarked_real_content_count > 0 else 1
                 if p_model and p_model.content_occurrences:
                     for occ in p_model.content_occurrences:
                         if occ.is_unmarked_real_content and occ.bbox:
@@ -90,18 +92,22 @@ class ContentTaggedRule(BaseRule):
                     object_reference=f"Untagged Content on Page {pg_num}",
                     custom_severity=Severity.HIGH,
                     custom_remediation="Tag the unmarked content in the logical structure tree or mark it as an Artifact.",
-                    items_count=1
+                    items_count=items_on_pg
                 ))
             if len(unmarked_pages) > 10:
-                rem = len(unmarked_pages) - 10
+                rem_pages = list(unmarked_pages.keys())[10:]
+                rem_items = sum(
+                    next((p.unmarked_real_content_count for p in doc.pages if p.page_number == pg), 1)
+                    for pg in rem_pages
+                )
                 results.append(self.create_result(
                     status=CheckStatus.FAIL,
-                    message=f"{rem} additional page(s) contain unmarked real content.",
+                    message=f"{len(rem_pages)} additional page(s) contain unmarked real content.",
                     evidence=f"Total pages with unmarked content: {len(unmarked_pages)}",
-                    page=list(unmarked_pages.keys())[10],
+                    page=rem_pages[0],
                     custom_severity=Severity.HIGH,
                     custom_remediation="Review and tag untagged content across pages.",
-                    items_count=rem
+                    items_count=rem_items
                 ))
 
         else:
