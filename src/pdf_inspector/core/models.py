@@ -639,7 +639,7 @@ class AuditReport:
             return counts
 
         elif std_up == "WCAG":
-            counts = {c: {"passed": 0, "warned": 0, "failed": 0, "manual": 0} for c in self.PAC_WCAG_CATEGORIES}
+            counts = {c: {"passed": 0, "warned": 0, "failed": 0, "manual": 0, "not_applicable": 0} for c in self.PAC_WCAG_CATEGORIES}
             for r in self.get_results_by_standard("WCAG"):
                 cat = r.category
                 if cat not in counts:
@@ -650,7 +650,7 @@ class AuditReport:
                             matched = True
                             break
                     if not matched:
-                        counts[cat] = {"passed": 0, "warned": 0, "failed": 0, "manual": 0}
+                        counts[cat] = {"passed": 0, "warned": 0, "failed": 0, "manual": 0, "not_applicable": 0}
                 cnt = r.items_count if (hasattr(r, "items_count") and r.items_count is not None) else 1
                 if r.status == CheckStatus.PASS:
                     counts[cat]["passed"] += cnt
@@ -660,6 +660,8 @@ class AuditReport:
                     counts[cat]["failed"] += cnt
                 elif r.status == CheckStatus.MANUAL_REVIEW:
                     counts[cat]["manual"] += cnt
+                elif r.status == CheckStatus.NOT_APPLICABLE:
+                    counts[cat]["not_applicable"] += (cnt if cnt > 0 else 1)
             return counts
 
         elif std_up == "AI":

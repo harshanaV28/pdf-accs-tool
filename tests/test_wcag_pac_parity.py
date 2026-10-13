@@ -213,9 +213,9 @@ def test_wcag_pac_parity_crossing_aegean():
 
 @pytest.mark.skipif(not os.path.exists(FRENCH_1A_PDF), reason="French 1A untagged PDF not found in Downloads")
 def test_wcag_pac_parity_french_1a():
-    """Verifies that French 1A (untagged document) fails untagged images, structure, and language:
-    - 1.1 Text Alternatives: Failed 288 (untagged images lacking alt text)
-    - 1.3 Adaptable: Failed 1 (untagged document)
+    """Verifies that French 1A (untagged document) matches PAC WCAG parity:
+    - 1.1 Text Alternatives: 0 (renders as '-' in PAC, untagged images violate 1.3.1)
+    - 1.3 Adaptable: Failed 289 (1 untagged document + 288 untagged images)
     - 2.4 Navigable: Failed 3 (missing title and metadata)
     - 3.1 Readable: Failed 1 (missing document language)
     """
@@ -223,8 +223,8 @@ def test_wcag_pac_parity_french_1a():
     report = AuditRunner().run(doc)
     wcag_counts = report.get_category_counts("WCAG")
 
-    assert wcag_counts["1.1 Text Alternatives"]["failed"] == 288
-    assert wcag_counts["1.3 Adaptable"]["failed"] == 1
+    assert wcag_counts.get("1.1 Text Alternatives", {}).get("failed", 0) == 0
+    assert wcag_counts["1.3 Adaptable"]["failed"] == 289
     assert wcag_counts["2.4 Navigable"]["failed"] == 3
     assert wcag_counts["3.1 Readable"]["failed"] == 1
 
