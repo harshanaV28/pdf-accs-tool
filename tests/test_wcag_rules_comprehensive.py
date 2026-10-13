@@ -248,11 +248,18 @@ def test_wcag_3_3_form_fields_tooltip():
         page_count=1, is_tagged=True, form_fields=[f1, f2]
     )
 
+    # In PAC, FormFieldHasTUKey is evaluated under 1.1 Text Alternatives
+    rule_1_1 = WCAGTextAlternativesRule()
+    results_1_1 = rule_1_1.evaluate(doc)
+    form_results = [r for r in results_1_1 if "FormField" in r.object_reference]
+    assert len(form_results) == 2
+    assert form_results[0].status == CheckStatus.PASS
+    assert form_results[1].status == CheckStatus.FAIL
+
+    # 3.3 Input Assistance returns empty list (0 machine checks in PAC)
     rule_3_3 = WCAGInputAssistanceRule()
     results_3_3 = rule_3_3.evaluate(doc)
-    assert len(results_3_3) == 2
-    assert results_3_3[0].status == CheckStatus.PASS
-    assert results_3_3[1].status == CheckStatus.FAIL
+    assert len(results_3_3) == 0
 
 
 def test_wcag_3_1_language_and_switches():

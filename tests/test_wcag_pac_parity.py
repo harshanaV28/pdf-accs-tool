@@ -188,7 +188,8 @@ def test_wcag_pac_parity_form_940():
     report = AuditRunner().run(doc)
     wcag_counts = report.get_category_counts("WCAG")
 
-    assert wcag_counts["3.3 Input Assistance"]["failed"] == 102
+    assert wcag_counts["1.1 Text Alternatives"]["failed"] == 102
+    assert wcag_counts["3.3 Input Assistance"]["failed"] == 0
     assert wcag_counts["1.3 Adaptable"]["failed"] == 0
     assert wcag_counts["2.4 Navigable"]["failed"] == 0
     assert sum(c.get("failed", 0) for c in wcag_counts.values()) == 102

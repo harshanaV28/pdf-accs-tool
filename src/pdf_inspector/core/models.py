@@ -424,11 +424,45 @@ class AuditReport:
         return [r for r in self.results if r.standard.upper() == standard.upper()]
 
     def get_category_counts(self, standard: str) -> Dict[str, Dict[str, int]]:
-        """Returns {category_name: {'passed': X, 'warned': Y, 'failed': Z, 'manual': W}}"""
+        """Returns {category_name: {'passed': X, 'warned': Y, 'failed': Z, 'manual': W, 'not_applicable': N}}"""
         counts: Dict[str, Dict[str, int]] = {}
+        std_upper = standard.upper()
+        if std_upper in ("WCAG", "WCAG2", "WCAG 2.1", "WCAG 2.2"):
+            for cat in [
+                "1.1 Text Alternatives",
+                "1.2 Time-based Media",
+                "1.3 Adaptable",
+                "1.4 Distinguishable",
+                "2.1 Keyboard Accessible",
+                "2.2 Enough Time",
+                "2.3 Seizures and Physical Reactions",
+                "2.4 Navigable",
+                "2.5 Input Modalities",
+                "3.1 Readable",
+                "3.2 Predictable",
+                "3.3 Input Assistance",
+                "4.1 Compatible",
+            ]:
+                counts[cat] = {"passed": 0, "warned": 0, "failed": 0, "manual": 0, "not_applicable": 0}
+        elif std_upper in ("PDF/UA", "PDFUA"):
+            for cat in [
+                "PDF Syntax (ISO 32000-1)",
+                "Fonts",
+                "Content",
+                "Embedded Files",
+                "Natural language",
+                "Structure elements",
+                "Structure tree",
+                "Role mapping",
+                "Alternative Descriptions",
+                "Metadata",
+                "Document settings",
+            ]:
+                counts[cat] = {"passed": 0, "warned": 0, "failed": 0, "manual": 0, "not_applicable": 0}
+
         for r in self.get_results_by_standard(standard):
             if r.category not in counts:
-                counts[r.category] = {"passed": 0, "warned": 0, "failed": 0, "manual": 0}
+                counts[r.category] = {"passed": 0, "warned": 0, "failed": 0, "manual": 0, "not_applicable": 0}
             cnt = r.items_count if (hasattr(r, "items_count") and r.items_count is not None) else 1
             if r.status == CheckStatus.PASS:
                 counts[r.category]["passed"] += cnt
@@ -438,6 +472,8 @@ class AuditReport:
                 counts[r.category]["failed"] += cnt
             elif r.status == CheckStatus.MANUAL_REVIEW:
                 counts[r.category]["manual"] += cnt
+            elif r.status == CheckStatus.NOT_APPLICABLE:
+                counts[r.category]["not_applicable"] += (cnt if cnt > 0 else 1)
         return counts
 
     @property
@@ -455,6 +491,10 @@ class AuditReport:
     @property
     def total_manual(self) -> int:
         return sum(r.items_count for r in self.results if r.status == CheckStatus.MANUAL_REVIEW)
+
+    @property
+    def total_not_applicable(self) -> int:
+        return sum(1 for r in self.results if r.status == CheckStatus.NOT_APPLICABLE)
 
     @property
     def total_checks(self) -> int:

@@ -151,6 +151,31 @@ class WCAGTextAlternativesRule(BaseRule):
                         items_count=1
                     ))
 
+        # 3. Form fields: Alternate names (/TU) (PAC FormFieldHasTUKey in SC 1.1.1)
+        if doc.form_fields:
+            for f in doc.form_fields:
+                if f.tooltip and f.tooltip.strip():
+                    results.append(self.create_result(
+                        status=CheckStatus.PASS,
+                        message=f"Form field '{f.name}' on page {f.page} has an accessible alternate name/tooltip (/TU).",
+                        evidence=f"Field '{f.name}' /TU: '{f.tooltip}'",
+                        page=f.page,
+                        bounding_box=f.bbox,
+                        object_reference=f"FormField '{f.name}'",
+                        items_count=1
+                    ))
+                else:
+                    results.append(self.create_result(
+                        status=CheckStatus.FAIL,
+                        message=f"Form field '{f.name}' on page {f.page} lacks an alternate name (/TU description) (WCAG SC 1.1.1 / FormFieldHasTUKey).",
+                        evidence=f"Field name: '{f.name}', Type: {f.field_type}",
+                        page=f.page,
+                        bounding_box=f.bbox,
+                        object_reference=f"FormField '{f.name}'",
+                        custom_remediation="Add a descriptive tooltip (/TU) to the form field in your PDF form authoring tool.",
+                        items_count=1
+                    ))
+
         return results
 
 
@@ -565,34 +590,9 @@ class WCAGInputAssistanceRule(BaseRule):
     remediation_template = "Provide clear tooltips (/TU) or accessible labels for all interactive form fields."
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
-        # If no form fields exist, 0 items are evaluated (reports '-' in PAC).
-        if not doc.form_fields:
-            return []
-
-        results: List[CheckResult] = []
-        for f in doc.form_fields:
-            if f.tooltip and f.tooltip.strip():
-                results.append(self.create_result(
-                    status=CheckStatus.PASS,
-                    message=f"Form field '{f.name}' on page {f.page} has accessible description/tooltip.",
-                    evidence=f"Field '{f.name}' /TU: '{f.tooltip}'",
-                    page=f.page,
-                    bounding_box=f.bbox,
-                    object_reference=f"FormField '{f.name}'",
-                    items_count=1
-                ))
-            else:
-                results.append(self.create_result(
-                    status=CheckStatus.FAIL,
-                    message=f"Form field '{f.name}' lacks an accessible tooltip (/TU description) on page {f.page} (SC 3.3.2).",
-                    evidence=f"Field name: '{f.name}', Type: {f.field_type}",
-                    page=f.page,
-                    bounding_box=f.bbox,
-                    object_reference=f"FormField '{f.name}'",
-                    custom_remediation="Open Form field properties in Acrobat Pro, go to General tab, and enter a helpful Tooltip.",
-                    items_count=1
-                ))
-        return results
+        # In PAC 2026, form field accessible names (/TU) are evaluated under 1.1 Text Alternatives (FormFieldHasTUKey).
+        # WCAG 3.3 Input Assistance has 0 automated machine checks in PAC and is reported as not-applicable ('-').
+        return []
 
 
 class WCAGCompatibleRule(BaseRule):
