@@ -82,6 +82,7 @@ def test_audit_report_statistics():
         CheckResult("C2", "R2", "Cat1", "PDF/UA", CheckStatus.FAIL, Severity.HIGH, "Failed"),
         CheckResult("C3", "R3", "Cat2", "PDF/UA", CheckStatus.WARNING, Severity.MEDIUM, "Warned"),
         CheckResult("C4", "R4", "Cat3", "PDF/UA", CheckStatus.MANUAL_REVIEW, Severity.INFO, "Manual"),
+        CheckResult("C5", "R5", "Cat4", "PDF/UA", CheckStatus.NOT_APPLICABLE, Severity.INFO, "Not applicable"),
     ]
 
     report = AuditReport(document_info={"filename": "test.pdf"}, results=results)
@@ -89,5 +90,21 @@ def test_audit_report_statistics():
     assert report.total_failed == 1
     assert report.total_warned == 1
     assert report.total_manual == 1
-    # Compliance score = 1 passed out of (1 passed + 1 warned + 1 failed) = 33.3%
+    assert report.total_not_applicable == 1
+    # Compliance score = 1 passed out of (1 passed + 1 warned + 1 failed) = 33.3% (not-applicable doesn't penalize)
     assert report.compliance_score == 33.3
+    assert report.summary["not_applicable"] == 1
+
+
+def test_audit_report_category_counts_preseeding():
+    report = AuditReport(document_info={"filename": "empty.pdf"}, results=[])
+    wcag_counts = report.get_category_counts("WCAG")
+    # All 13 WCAG categories are pre-seeded and safe from KeyError
+    assert len(wcag_counts) == 13
+    assert "1.1 Text Alternatives" in wcag_counts
+    assert "3.3 Input Assistance" in wcag_counts
+    assert wcag_counts["3.3 Input Assistance"]["failed"] == 0
+    assert wcag_counts["3.3 Input Assistance"]["passed"] == 0
+    assert wcag_counts["3.3 Input Assistance"]["warned"] == 0
+    assert wcag_counts["3.3 Input Assistance"]["not_applicable"] == 0
+

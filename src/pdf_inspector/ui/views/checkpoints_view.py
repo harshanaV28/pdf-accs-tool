@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QIcon, QColor, QFont, QPixmap, QImage
 from ...core.models import AuditReport, PDFDocumentModel, CheckStatus
+from ...engine.wcag.wcag_meta import WCAG_GUIDELINE_META
 
 
 class CheckpointTableWidget(QTableWidget):
@@ -69,7 +70,7 @@ class CheckpointTableWidget(QTableWidget):
     def update_counts(self, counts_by_cat: Dict[str, Dict[str, int]]):
         """Updates row numbers and status icons matching PAC."""
         for row, cat in enumerate(self.categories):
-            c_data = counts_by_cat.get(cat, {"passed": 0, "warned": 0, "failed": 0, "manual": 0})
+            c_data = counts_by_cat.get(cat, {"passed": 0, "warned": 0, "failed": 0, "manual": 0, "not_applicable": 0})
             p = c_data["passed"]
             w = c_data["warned"]
             f = c_data["failed"]
@@ -87,7 +88,12 @@ class CheckpointTableWidget(QTableWidget):
             item_name = self.item(row, 0)
             if item_name:
                 item_name.setText(f"{icon_str}  {cat}")
-                item_name.setToolTip(f"{cat}: {p} passed, {w} warned, {f} failed")
+                wcag_meta = WCAG_GUIDELINE_META.get(cat) if self.standard_name.upper() in ("WCAG", "WCAG2", "WCAG 2.1", "WCAG 2.2") else None
+                meta_prefix = f"{cat} [{wcag_meta['principle']} • {wcag_meta['criteria']}]" if wcag_meta else cat
+                if p == 0 and w == 0 and f == 0:
+                    item_name.setToolTip(f"{meta_prefix}\nStatus: Not applicable (⊘ no applicable objects found)")
+                else:
+                    item_name.setToolTip(f"{meta_prefix}\nStatus: {p} passed, {w} warned, {f} failed")
 
             # Passed column
             item_p = self.item(row, 1)
@@ -393,11 +399,14 @@ class CheckpointsView(QWidget):
         def _get_status_icon(counts):
             failed = sum(c.get("failed", 0) for c in counts.values())
             warned = sum(c.get("warned", 0) for c in counts.values())
+            passed = sum(c.get("passed", 0) for c in counts.values())
             if failed > 0:
                 return "❌"
             elif warned > 0:
                 return "⚠️"
-            return "✅"
+            elif passed > 0:
+                return "✅"
+            return "⊘"
 
         ai_icon = _get_status_icon(ai_counts)
         self.tab_widget.setTabText(0, f"{_get_status_icon(pdfua_counts)} PDF/UA")
@@ -406,7 +415,7 @@ class CheckpointsView(QWidget):
         self.tab_widget.setTabText(3, f"{ai_icon} AI" if ai_icon != "✅" else "AI")
 
         # Compliance Banner
-        pdfua_failed = sum(c["failed"] for c in pdfua_counts.values())
+        pdfua_failed = sum(c.get("failed", 0) for c in pdfua_counts.values())
         if pdfua_failed > 0:
             self.lbl_pdfua_banner.setText("This PDF file is not PDF/UA compliant.")
             self.lbl_pdfua_banner.setStyleSheet("font-size: 13px; font-weight: bold; color: #1e293b; padding: 4px 2px;")

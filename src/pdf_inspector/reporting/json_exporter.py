@@ -25,6 +25,7 @@ class JSONExporter:
                 "warned": report.total_warned,
                 "failed": report.total_failed,
                 "manual_review": report.total_manual,
+                "not_applicable": report.total_not_applicable,
                 "compliance_score": report.compliance_score,
                 "compliance_score_percent": report.compliance_score,
             },

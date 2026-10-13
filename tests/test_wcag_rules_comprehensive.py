@@ -226,13 +226,16 @@ def test_wcag_2_1_keyboard_and_tab_order():
         page_count=3, is_tagged=True, pages=[p1, p2, p3], links=[link1, link2]
     )
 
-    rule = WCAGKeyboardAccessibleRule()
-    results = rule.evaluate(doc)
+    rule_2_1 = WCAGKeyboardAccessibleRule()
+    results_2_1 = rule_2_1.evaluate(doc)
+    # WCAG 2.1 has zero machine checks in PAC
+    assert len(results_2_1) == 0
 
-    # Page 1 -> PASS, Page 2 -> WARNING, Page 3 -> skipped (no interactive controls)
-    assert len(results) == 2
-    assert results[0].page == 1 and results[0].status == CheckStatus.PASS
-    assert results[1].page == 2 and results[1].status == CheckStatus.WARNING
+    # Tab order is evaluated under 2.4 Navigable (SC 2.4.3 Focus Order)
+    rule_2_4 = WCAGNavigableRule()
+    results_2_4 = rule_2_4.evaluate(doc)
+    tab_fails = [r for r in results_2_4 if r.page == 2 and r.status == CheckStatus.FAIL]
+    assert len(tab_fails) == 1
 
 
 def test_wcag_3_3_form_fields_tooltip():
@@ -245,12 +248,18 @@ def test_wcag_3_3_form_fields_tooltip():
         page_count=1, is_tagged=True, form_fields=[f1, f2]
     )
 
-    rule = WCAGInputAssistanceRule()
-    results = rule.evaluate(doc)
+    # In PAC, FormFieldHasTUKey is evaluated under 1.1 Text Alternatives
+    rule_1_1 = WCAGTextAlternativesRule()
+    results_1_1 = rule_1_1.evaluate(doc)
+    form_results = [r for r in results_1_1 if "FormField" in r.object_reference]
+    assert len(form_results) == 2
+    assert form_results[0].status == CheckStatus.PASS
+    assert form_results[1].status == CheckStatus.FAIL
 
-    assert len(results) == 2
-    assert results[0].status == CheckStatus.PASS
-    assert results[1].status == CheckStatus.FAIL
+    # 3.3 Input Assistance returns empty list (0 machine checks in PAC)
+    rule_3_3 = WCAGInputAssistanceRule()
+    results_3_3 = rule_3_3.evaluate(doc)
+    assert len(results_3_3) == 0
 
 
 def test_wcag_3_1_language_and_switches():

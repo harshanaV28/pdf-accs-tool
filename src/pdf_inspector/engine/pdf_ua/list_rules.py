@@ -19,7 +19,7 @@ class ListStructureHierarchyRule(BaseRule):
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
         results = []
-        if not doc.structure_tree or not doc.lists:
+        if not doc.lists:
             return [self.create_result(
                 status=CheckStatus.PASS,
                 message="No lists detected in document (or document contains no list structures).",
@@ -28,6 +28,8 @@ class ListStructureHierarchyRule(BaseRule):
             )]
 
         invalid_lists = [l for l in doc.lists if not l.is_valid_structure]
+        passed_lists = [l for l in doc.lists if l.is_valid_structure]
+        fail_items_count = 0 if doc.structure_tree else 1
         if invalid_lists:
             for l in invalid_lists[:5]:
                 results.append(self.create_result(
@@ -37,7 +39,25 @@ class ListStructureHierarchyRule(BaseRule):
                     page=l.page,
                     object_reference=f"List {l.id}",
                     custom_severity=Severity.HIGH,
-                    custom_remediation="Restructure the list so each item is enclosed in an <LI> containing <Lbl> (bullet/number) and <LBody> (text)."
+                    custom_remediation="Restructure the list so each item is enclosed in an <LI> containing <Lbl> (bullet/number) and <LBody> (text).",
+                    items_count=fail_items_count
+                ))
+            if len(invalid_lists) > 5:
+                rem = len(invalid_lists) - 5
+                results.append(self.create_result(
+                    status=CheckStatus.FAIL,
+                    message=f"{rem} additional list(s) have invalid structural hierarchies.",
+                    evidence=f"Invalid list count: {len(invalid_lists)}",
+                    custom_severity=Severity.HIGH,
+                    custom_remediation="Restructure lists according to ISO 14289-1 clause 7.4.",
+                    items_count=rem * fail_items_count
+                ))
+            if passed_lists:
+                results.append(self.create_result(
+                    status=CheckStatus.PASS,
+                    message=f"{len(passed_lists)} of {len(doc.lists)} list(s) conform to ISO standard structural list hierarchies.",
+                    evidence=f"Valid lists: {len(passed_lists)}/{len(doc.lists)}",
+                    items_count=0
                 ))
         else:
             total_li = sum(l.items_count for l in doc.lists) if doc.lists else len(doc.lists)

@@ -218,8 +218,8 @@ def test_form_fields_tooltips_and_tab_order():
         page_count=1, is_tagged=True, form_fields=[f1, f2]
     )
 
-    from src.pdf_inspector.engine.wcag.wcag_rules import WCAGInputAssistanceRule
-    res = WCAGInputAssistanceRule().evaluate(doc)
+    from src.pdf_inspector.engine.wcag.wcag_rules import WCAGTextAlternativesRule
+    res = WCAGTextAlternativesRule().evaluate(doc)
     assert any(r.status == CheckStatus.FAIL and "ssn" in r.evidence for r in res)
 
 

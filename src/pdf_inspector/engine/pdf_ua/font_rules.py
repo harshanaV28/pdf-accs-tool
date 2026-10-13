@@ -26,7 +26,7 @@ class FontEmbeddingRule(BaseRule):
         if unembedded:
             for f in unembedded:
                 target_pages = f.pages if f.pages else [1]
-                for p in target_pages:
+                for idx, p in enumerate(target_pages):
                     results.append(self.create_result(
                         status=CheckStatus.FAIL,
                         message=f"Font '{f.name}' is not embedded.",
@@ -34,7 +34,7 @@ class FontEmbeddingRule(BaseRule):
                         page=p,
                         object_reference=f"Font {f.name}",
                         custom_remediation="Open document in Acrobat Pro Preflight, select 'Embed missing fonts', and save the file.",
-                        items_count=1
+                        items_count=1 if idx == 0 else 0
                     ))
             passed_cnt = max(0, len(doc.fonts) - len(unembedded))
             if passed_cnt > 0:

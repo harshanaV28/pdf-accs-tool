@@ -693,6 +693,10 @@ class AuditReport:
         return sum(r.items_count for r in self.results if r.status == CheckStatus.MANUAL_REVIEW)
 
     @property
+    def total_not_applicable(self) -> int:
+        return sum(1 for r in self.results if r.status == CheckStatus.NOT_APPLICABLE)
+
+    @property
     def total_checks(self) -> int:
         """Total number of individual item-level checks evaluated across all rules."""
         return self.total_passed + self.total_warned + self.total_failed + self.total_manual
@@ -718,6 +722,7 @@ class AuditReport:
             "warned": self.total_warned,
             "failed": self.total_failed,
             "manual": self.total_manual,
+            "not_applicable": self.total_not_applicable,
             "compliance_score": self.compliance_score,
             "findings_count": self.total_findings_count
         }
