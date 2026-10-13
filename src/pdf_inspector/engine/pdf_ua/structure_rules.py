@@ -424,12 +424,13 @@ class StructureNestingRule(BaseRule):
                     items_count=rem_fail
                 ))
 
-        # Evaluated structure element checks (lists, tables, compound structures, block/inline elements)
+        # Evaluated structure element checks (grouping and block-level structural hierarchy elements matching PAC)
         evaluated_elements = [
             n for n in all_nodes
             if (n.standard_tag or "") in (
-                "Table", "TR", "THEAD", "TBODY", "TFOOT", "L", "LI", "Lbl", "LBody",
-                "Figure", "Formula", "Form", "H1", "H2", "H3", "H4", "H5", "H6"
+                "H", "H1", "H2", "H3", "H4", "H5", "H6", "Table", "TH",
+                "Document", "Art", "Part", "Sect", "Div", "Index", "TOC", "TOCI",
+                "Formula", "Form"
             )
         ]
         # In PAC checkpoint matrix, structure elements checkpoint tracks distinct structural element units

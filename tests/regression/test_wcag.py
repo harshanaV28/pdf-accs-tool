@@ -10,7 +10,7 @@ Regression tests for WCAG 2.1/2.2 AA Rules:
 import pytest
 from src.pdf_inspector.core.models import (
     PDFDocumentModel, StructureNode, ImageModel, LinkModel, FormFieldModel,
-    AnnotationModel, CheckStatus, Severity
+    AnnotationModel, CheckStatus, Severity, PageModel
 )
 from src.pdf_inspector.engine.wcag.wcag_rules import (
     WCAGTextAlternativesRule,
@@ -33,14 +33,14 @@ class TestWCAGRegression:
         res1 = rule.evaluate(doc_no_title)
         assert any(r.status == CheckStatus.FAIL and "Title" in r.message for r in res1)
 
-        # Case 2: Document has title, but DisplayDocTitle is False -> SC 2.4.2 WARNING
+        # Case 2: Document has title, but DisplayDocTitle is False -> SC 2.4.2 FAIL (per PAC / WCAG SC 2.4.2)
         doc_title_no_disp = PDFDocumentModel(
             filepath="", filename="titled.pdf", filesize=100, pdf_version="1.7",
             page_count=1, title="Test Report", xmp_dc_title="Test Report",
             display_doc_title=False
         )
         res2 = rule.evaluate(doc_title_no_disp)
-        assert any(r.status == CheckStatus.WARNING and "DisplayDocTitle" in r.message for r in res2)
+        assert any(r.status == CheckStatus.FAIL and "DisplayDocTitle" in r.message for r in res2)
 
         # Case 3: Document has title and DisplayDocTitle is True -> SC 2.4.2 PASS
         doc_full_title = PDFDocumentModel(
@@ -51,16 +51,18 @@ class TestWCAGRegression:
         res3 = rule.evaluate(doc_full_title)
         assert any(r.status == CheckStatus.PASS and "title" in r.message.lower() for r in res3)
 
-    def test_wcag_navigable_ambiguous_links(self):
+    def test_wcag_navigable_tab_order(self):
+        """Pages with interactive annotations must specify /Tabs /S (SC 2.4.3 Focus Order)."""
         rule = WCAGNavigableRule()
+        p1 = PageModel(page_number=1, width=612, height=792, tab_order_mode="None")
         link_bad = LinkModel(id="l1", page=1, text="click here", uri="https://example.com", bbox=(10, 10, 50, 20))
-        doc_bad_link = PDFDocumentModel(
+        doc_bad_tab = PDFDocumentModel(
             filepath="", filename="link.pdf", filesize=100, pdf_version="1.7",
-            page_count=1, title="Links", xmp_dc_title="Links", display_doc_title=True,
+            page_count=1, pages=[p1], title="Links", xmp_dc_title="Links", display_doc_title=True,
             links=[link_bad]
         )
-        res = rule.evaluate(doc_bad_link)
-        assert any(r.status == CheckStatus.WARNING and "Ambiguous link text" in r.message for r in res)
+        res = rule.evaluate(doc_bad_tab)
+        assert any(r.status == CheckStatus.FAIL and "tab order" in r.message.lower() for r in res)
 
     def test_wcag_compatible_rule(self):
         rule = WCAGCompatibleRule()

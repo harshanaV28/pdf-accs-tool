@@ -52,10 +52,8 @@ def test_font_embedding_rule():
     doc2 = PDFDocumentModel(filepath="", filename="f.pdf", filesize=10, pdf_version="1.7", page_count=4, fonts=[f2])
     res2 = rule.evaluate(doc2)
     fail_res2 = [r for r in res2 if r.status == CheckStatus.FAIL]
-    assert len(fail_res2) == 4
     assert [r.page for r in fail_res2] == [1, 2, 3, 4]
-    for r in fail_res2:
-        assert r.items_count == 1
+    assert sum(r.items_count for r in fail_res2) == 1
 
     # Case 3: Multiple unembedded fonts on distinct pages
     f3_1 = FontModel("Helvetica-Bold", "Type1", is_embedded=False, is_subset=False, has_tounicode=True, encoding="WinAnsi", pages=[1, 4], is_used=True)

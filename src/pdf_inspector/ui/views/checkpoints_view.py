@@ -426,6 +426,14 @@ class CheckpointsView(QWidget):
             self.lbl_pdfua_banner.setText("This PDF file is PDF/UA compliant.")
             self.lbl_pdfua_banner.setStyleSheet("font-size: 13px; font-weight: bold; color: #15803d; padding: 4px 2px;")
 
+        wcag_failed = sum(c["failed"] for c in wcag_counts.values())
+        if wcag_failed > 0:
+            self.lbl_wcag_banner.setText("This PDF file is not WCAG 2.2 compliant.")
+            self.lbl_wcag_banner.setStyleSheet("font-size: 13px; font-weight: bold; color: #1e293b; padding: 4px 2px;")
+        else:
+            self.lbl_wcag_banner.setText("This PDF file is WCAG 2.2 compliant.")
+            self.lbl_wcag_banner.setStyleSheet("font-size: 13px; font-weight: bold; color: #15803d; padding: 4px 2px;")
+
         # Update metadata card if doc model provided
         if doc is not None:
             self.lbl_val_title.setText(doc.title.strip() if doc.title and doc.title.strip() else "No title")

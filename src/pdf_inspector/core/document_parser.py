@@ -429,6 +429,15 @@ class DocumentParser:
                                                     cleaned = re.sub(r"\\[nrtbf\\()]", "", cleaned).strip()
                                                     if sum(c.isalnum() for c in cleaned) >= 3:
                                                         snippets.append(cleaned)
+                                            if not snippets and xo_rect:
+                                                try:
+                                                    cb = fitz_page.cropbox
+                                                    r_fitz = pymupdf.Rect(xo_rect[0] - cb.x0, cb.y1 - xo_rect[3], xo_rect[2] - cb.x0 + 10, cb.y1 - xo_rect[1] + 10)
+                                                    nearby_words = [w[4] for w in fitz_page.get_text("words") if pymupdf.Rect(w[:4]).intersects(r_fitz) or abs(w[0] - (xo_rect[0] - cb.x0)) < 15]
+                                                    if nearby_words:
+                                                        snippets.append(" ".join(nearby_words[:12]))
+                                                except Exception:
+                                                    pass
                                             xobject_artifact_cache[xref] = (len(xo_art_matches), snippets)
                                         except Exception:
                                             xobject_artifact_cache[xref] = (0, [])
