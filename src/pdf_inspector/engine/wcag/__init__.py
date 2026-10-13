@@ -16,6 +16,8 @@ from .wcag_rules import (
     WCAGCompatibleRule,
 )
 
+from .wcag_meta import WCAG_GUIDELINE_META
+
 WCAG_RULES = [
     WCAGTextAlternativesRule(),
     WCAGTimeBasedMediaRule(),
@@ -34,6 +36,7 @@ WCAG_RULES = [
 
 __all__ = [
     "WCAG_RULES",
+    "WCAG_GUIDELINE_META",
     "WCAGTextAlternativesRule",
     "WCAGTimeBasedMediaRule",
     "WCAGAdaptableRule",

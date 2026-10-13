@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal, Qt
 from ...core.models import CheckResult, CheckStatus, Severity
+from ...engine.wcag.wcag_meta import WCAG_GUIDELINE_META
 from .status_badge import StatusBadge, SeverityBadge
 
 
@@ -161,8 +162,15 @@ class FindingDetailsPanel(QWidget):
             self.status_badge.setStatus(CheckStatus.NOT_APPLICABLE)
             self.severity_badge.setSeverity(Severity.INFO)
 
-        self.id_label.setText(f"Checkpoint: {category}")
-        self.standard_label.setText(f"Standard: {standard}")
+        wcag_meta = WCAG_GUIDELINE_META.get(category) if standard.upper() in ("WCAG", "WCAG2", "WCAG 2.1", "WCAG 2.2") else None
+
+        if wcag_meta:
+            self.id_label.setText(f"Criteria: {wcag_meta['criteria']}")
+            self.standard_label.setText(f"Principle: {wcag_meta['principle']} ({wcag_meta['level']})")
+        else:
+            self.id_label.setText(f"Checkpoint: {category}")
+            self.standard_label.setText(f"Standard: {standard}")
+
         if p == 0 and w == 0 and f == 0:
             self.page_label.setText("Status: Not Applicable (⊘)")
             self.object_label.setText("Total Evaluated: 0")
@@ -171,23 +179,47 @@ class FindingDetailsPanel(QWidget):
             self.object_label.setText(f"Total Evaluated: {p + w + f}")
 
         if p == 0 and w == 0 and f == 0:
-            self.txt_explanation.setPlainText(
-                f"Checkpoint '{category}' is not applicable to this document, or contains no machine-testable objects in this PDF."
-            )
-            self.txt_evidence.setPlainText("No applicable objects found (⊘).")
-            self.txt_remediation.setPlainText("No action required. This checkpoint does not apply or contains no evaluable elements.")
+            if wcag_meta:
+                self.txt_explanation.setPlainText(
+                    f"{category} ({wcag_meta['criteria']}):\n{wcag_meta['summary']}\n\n"
+                    f"Notice: {wcag_meta['not_applicable_guidance']}"
+                )
+                self.txt_evidence.setPlainText("No applicable objects found (⊘).")
+                self.txt_remediation.setPlainText(wcag_meta['remediation'])
+            else:
+                self.txt_explanation.setPlainText(
+                    f"Checkpoint '{category}' is not applicable to this document, or contains no machine-testable objects in this PDF."
+                )
+                self.txt_evidence.setPlainText("No applicable objects found (⊘).")
+                self.txt_remediation.setPlainText("No action required. This checkpoint does not apply or contains no evaluable elements.")
         elif f == 0 and w == 0:
-            self.txt_explanation.setPlainText(
-                f"All checks for '{category}' passed successfully according to {standard} requirements."
-            )
-            self.txt_evidence.setPlainText(f"Compliance confirmed: {p} item(s) passed.")
-            self.txt_remediation.setPlainText("No remediation necessary. This checkpoint conforms to accessibility requirements.")
+            if wcag_meta:
+                self.txt_explanation.setPlainText(
+                    f"{category} ({wcag_meta['criteria']}):\n{wcag_meta['summary']}\n\n"
+                    f"Status: All {p} evaluated element(s) conform to {wcag_meta['level']} requirements."
+                )
+                self.txt_evidence.setPlainText(f"Compliance confirmed: {p} item(s) passed.")
+                self.txt_remediation.setPlainText(f"Compliant: {wcag_meta['remediation']}")
+            else:
+                self.txt_explanation.setPlainText(
+                    f"All checks for '{category}' passed successfully according to {standard} requirements."
+                )
+                self.txt_evidence.setPlainText(f"Compliance confirmed: {p} item(s) passed.")
+                self.txt_remediation.setPlainText("No remediation necessary. This checkpoint conforms to accessibility requirements.")
         else:
-            self.txt_explanation.setPlainText(
-                f"Evaluation of '{category}' identified {f} failure(s) and {w} warning(s)."
-            )
-            self.txt_evidence.setPlainText(f"Passed: {p}, Warned: {w}, Failed: {f}")
-            self.txt_remediation.setPlainText("Double-click this row or navigate to 'Detailed Results' to inspect individual findings and page highlights.")
+            if wcag_meta:
+                self.txt_explanation.setPlainText(
+                    f"{category} ({wcag_meta['criteria']}):\n{wcag_meta['summary']}\n\n"
+                    f"Identified {f} failure(s) and {w} warning(s) requiring remediation."
+                )
+                self.txt_evidence.setPlainText(f"Passed: {p}, Warned: {w}, Failed: {f}")
+                self.txt_remediation.setPlainText(wcag_meta['remediation'])
+            else:
+                self.txt_explanation.setPlainText(
+                    f"Evaluation of '{category}' identified {f} failure(s) and {w} warning(s)."
+                )
+                self.txt_evidence.setPlainText(f"Passed: {p}, Warned: {w}, Failed: {f}")
+                self.txt_remediation.setPlainText("Double-click this row or navigate to 'Detailed Results' to inspect individual findings and page highlights.")
 
         self.btn_highlight.setEnabled(False)
 

@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QIcon, QColor, QFont, QPixmap, QImage
 from ...core.models import AuditReport, PDFDocumentModel, CheckStatus
+from ...engine.wcag.wcag_meta import WCAG_GUIDELINE_META
 
 
 class CheckpointTableWidget(QTableWidget):
@@ -87,10 +88,12 @@ class CheckpointTableWidget(QTableWidget):
             item_name = self.item(row, 0)
             if item_name:
                 item_name.setText(f"{icon_str}  {cat}")
+                wcag_meta = WCAG_GUIDELINE_META.get(cat) if self.standard_name.upper() in ("WCAG", "WCAG2", "WCAG 2.1", "WCAG 2.2") else None
+                meta_prefix = f"{cat} [{wcag_meta['principle']} • {wcag_meta['criteria']}]" if wcag_meta else cat
                 if p == 0 and w == 0 and f == 0:
-                    item_name.setToolTip(f"{cat}: Not applicable (⊘ no applicable objects found)")
+                    item_name.setToolTip(f"{meta_prefix}\nStatus: Not applicable (⊘ no applicable objects found)")
                 else:
-                    item_name.setToolTip(f"{cat}: {p} passed, {w} warned, {f} failed")
+                    item_name.setToolTip(f"{meta_prefix}\nStatus: {p} passed, {w} warned, {f} failed")
 
             # Passed column
             item_p = self.item(row, 1)
