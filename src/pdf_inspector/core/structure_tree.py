@@ -168,11 +168,20 @@ class StructureTreeParser:
                 k_val = root_obj["/K"]
                 self._parse_k(k_val, root_node)
 
+            # Link MCIDs from ParentTree to matching or ancestor StructureNodes
+            if self.has_parent_tree and self.parent_tree_entries:
+                self._link_parent_tree_mcids(root_node)
+
             # Compute root pages spanned
             root_spanned = set()
             for c in root_node.children:
                 root_spanned.update(c.pages_spanned)
             root_node.pages_spanned = sorted(list(root_spanned))
+
+            # Ensure nodes with spanned pages have their primary page assigned
+            for n in root_node.find_all_nodes():
+                if n.page is None and n.pages_spanned:
+                    n.page = n.pages_spanned[0]
 
             return root_node
         except Exception as e:
@@ -302,7 +311,8 @@ class StructureTreeParser:
                 placement=placement,
                 obj_num=getattr(item, "objgen", (None, None))[0] if hasattr(item, "objgen") else None,
                 has_pg_attr=has_pg,
-                pg_attr_val=pg_val
+                pg_attr_val=pg_val,
+                parent=parent_node
             )
 
             # Traverse /K of this element
@@ -319,7 +329,9 @@ class StructureTreeParser:
 
             # Detect character decoding anomalies (unmapped glyphs / PUA without ActualText)
             sample_text = (actual_text or "") + (child_node.text_content or "")
-            if "\ufffd" in sample_text or (any("\ue000" <= c <= "\uf8ff" for c in (child_node.text_content or "")) and not actual_text):
+            pua_present = any("\ue000" <= c <= "\uf8ff" for c in (child_node.text_content or ""))
+            is_exempt = child_node.is_in_formula() or bool(actual_text) or child_node.has_actual_text_ancestor() or child_node.is_artifact_ancestor()
+            if "\ufffd" in sample_text or (pua_present and not is_exempt):
                 child_node.has_decoding_error = True
                 child_node.decoding_error_msg = "Contains unmapped glyphs, replacement characters (), or undecodable font encoding."
 
@@ -383,6 +395,55 @@ class StructureTreeParser:
             max_x = max(b[2] for b in bboxes)
             max_y = max(b[3] for b in bboxes)
             node.bbox = (min_x, min_y, max_x, max_y)
+
+    def _link_parent_tree_mcids(self, root_node: StructureNode):
+        """Associates MCIDs from ParentTree with corresponding structure elements or nearest ancestor."""
+        all_nodes = root_node.find_all_nodes()
+        nodes_by_obj: Dict[int, StructureNode] = {n.obj_num: n for n in all_nodes if n.obj_num is not None}
+
+        # Build map of struct_parents_id -> page_num
+        sp_to_page: Dict[int, int] = {}
+        for page_idx, pike_page in enumerate(self.pdf.pages, start=1):
+            if "/StructParents" in pike_page:
+                try:
+                    sp_to_page[int(pike_page["/StructParents"])] = page_idx
+                except Exception:
+                    pass
+
+        for sp_id, items in self.parent_tree_entries.items():
+            page_num = sp_to_page.get(sp_id, 1)
+            target_list = []
+            if isinstance(items, (pikepdf.Array, list)):
+                target_list = list(enumerate(items))
+            elif isinstance(items, (pikepdf.Dictionary, dict)):
+                target_list = list(items.items())
+
+            for mcid, target in target_list:
+                if target is None:
+                    continue
+                try:
+                    mcid_int = int(mcid)
+                except Exception:
+                    continue
+
+                target_obj_num = getattr(target, "objgen", (None, None))[0] if hasattr(target, "objgen") else None
+                node = nodes_by_obj.get(target_obj_num)
+                if not node and isinstance(target, pikepdf.Dictionary):
+                    # Check parent /P to find closest ancestor present in the structure tree
+                    p = target.get("/P")
+                    while p is not None:
+                        p_num = getattr(p, "objgen", (None, None))[0] if hasattr(p, "objgen") else None
+                        if p_num in nodes_by_obj:
+                            node = nodes_by_obj[p_num]
+                            break
+                        p = p.get("/P") if isinstance(p, pikepdf.Dictionary) else None
+
+                if node:
+                    if mcid_int not in node.mcids:
+                        node.mcids.append(mcid_int)
+                        node.mcid_entries.append((mcid_int, node.page or page_num))
+                    if node.page is None:
+                        node.page = page_num
 
     def _resolve_page_number(self, pg_obj: Any) -> Optional[int]:
         """Resolves a pikepdf page dictionary or indirect object to a 1-based page number."""

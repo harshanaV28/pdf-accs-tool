@@ -19,15 +19,11 @@ class AnnotationTaggedRule(BaseRule):
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
         results = []
-        if not doc.annotations:
-            return [self.create_result(
-                status=CheckStatus.PASS,
-                message="No interactive annotations found in document.",
-                evidence="Annotation count: 0"
-            )]
+        if not doc.is_tagged or not doc.annotations:
+            return results
 
         untagged_annots = [a for a in doc.annotations if not a.is_tagged and a.subtype in ("Link", "Widget", "Text")]
-        if untagged_annots and doc.is_tagged:
+        if untagged_annots:
             for a in untagged_annots[:5]:
                 results.append(self.create_result(
                     status=CheckStatus.FAIL,
@@ -60,35 +56,33 @@ class PageTabOrderRule(BaseRule):
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
         results = []
+        if not doc.pages:
+            return results
 
-        # Identify pages containing annotations where tab_order_mode != "S"
-        violating_pages = []
-        for p in doc.pages:
-            has_annots = (
-                getattr(p, "annotations_count", 0) > 0
-                or p.links_count > 0
-                or any(a.page == p.page_number for a in doc.annotations)
-            )
-            if has_annots and p.tab_order_mode != "S":
-                violating_pages.append(p.page_number)
+        violating_pages = [p.page_number for p in doc.pages if p.tab_order_mode != "S"]
+        has_annots = any(
+            getattr(p, "annotations_count", 0) > 0
+            or p.links_count > 0
+            or any(a.page == p.page_number for a in doc.annotations)
+            for p in doc.pages
+        )
 
-        if violating_pages:
-            for p_num in violating_pages:
-                mode_str = doc.pages[p_num - 1].tab_order_mode if p_num <= len(doc.pages) else "None"
-                results.append(self.create_result(
-                    status=CheckStatus.FAIL,
-                    message=f"Page {p_num} has annotations but tab order is not set to structure (/Tabs /S).",
-                    evidence=f"Page {p_num} contains annotations with tab order mode: '{mode_str}'.",
-                    page=p_num,
-                    custom_severity=Severity.HIGH,
-                    custom_remediation="In Acrobat Pro Page Thumbnails, set Page Properties > Tab Order to 'Use Document Structure' (/Tabs /S).",
-                    items_count=1
-                ))
+        if violating_pages and (not doc.is_tagged or has_annots):
+            results.append(self.create_result(
+                status=CheckStatus.FAIL,
+                message=f"{len(violating_pages)} page(s) do not specify Structure tab order (/Tabs /S).",
+                evidence=f"Pages lacking /Tabs /S: {violating_pages[:5]}",
+                page=violating_pages[0],
+                custom_severity=Severity.HIGH,
+                custom_remediation="In Acrobat Pro Page Thumbnails, set Page Properties > Tab Order to 'Use Document Structure' (/Tabs /S).",
+                items_count=1
+            ))
         else:
             results.append(self.create_result(
                 status=CheckStatus.PASS,
-                message="All pages containing annotations specify Structure tab order (/Tabs /S).",
-                evidence="Page tab navigation conforms to document structure order (/Tabs /S)."
+                message="All pages specify Structure tab order (/Tabs /S) or contain no interactive annotations.",
+                evidence="Page tab navigation conforms to document structure order (/Tabs /S).",
+                items_count=1
             ))
 
         return results

@@ -137,6 +137,34 @@ class StructureNode:
     expanded_text: Optional[str] = None
     has_decoding_error: bool = False
     decoding_error_msg: str = ""
+    parent: Optional['StructureNode'] = field(default=None, repr=False)
+
+    def is_in_formula(self) -> bool:
+        """Returns True if this node or any ancestor is a Formula or Math element."""
+        curr = self
+        while curr:
+            if (curr.standard_tag or curr.tag or "").upper() in ("FORMULA", "MATH"):
+                return True
+            curr = curr.parent
+        return False
+
+    def has_actual_text_ancestor(self) -> bool:
+        """Returns True if this node or any ancestor has non-empty /ActualText or /Alt."""
+        curr = self
+        while curr:
+            if (curr.actual_text and curr.actual_text.strip()) or (curr.alt_text and curr.alt_text.strip()):
+                return True
+            curr = curr.parent
+        return False
+
+    def is_artifact_ancestor(self) -> bool:
+        """Returns True if this node or any ancestor is marked decorative/artifact."""
+        curr = self
+        while curr:
+            if curr.is_decorative():
+                return True
+            curr = curr.parent
+        return False
 
     def get_readable_text(self, recursive: bool = True) -> str:
         """
@@ -323,6 +351,20 @@ class ArtifactOccurrenceModel:
 
 
 @dataclass
+class FormXObjectModel:
+    """Represents a Form XObject (ISO 32000-1 Clause 8.10) stream dictionary."""
+    id: str
+    obj_num: int
+    has_valid_bbox: bool = True
+    bbox: Optional[Tuple[float, float, float, float]] = None
+    has_matrix: bool = False
+    matrix_valid: bool = True
+    struct_parents: Optional[int] = None
+    is_valid: bool = True
+    error_message: str = ""
+
+
+@dataclass
 class PageModel:
     """Represents metadata and geometry for a single PDF page."""
     page_number: int  # 1-indexed
@@ -342,6 +384,8 @@ class PageModel:
     artifacts: List[ArtifactOccurrenceModel] = field(default_factory=list)
     content_occurrences: List[ContentOccurrenceModel] = field(default_factory=list)
     unmarked_real_content_count: int = 0
+    tagged_operations_count: int = 0
+    artifact_operations_count: int = 0
     tagged_in_artifact_count: int = 0
     artifact_in_tagged_count: int = 0
     annotations_count: int = 0
@@ -395,6 +439,7 @@ class PDFDocumentModel:
     bookmarks: List[BookmarkModel] = field(default_factory=list)
     raw_metadata: Dict[str, Any] = field(default_factory=dict)
     embedded_files_count: int = 0
+    form_xobjects: List[FormXObjectModel] = field(default_factory=list)
 
     @property
     def all_artifacts(self) -> List[ArtifactOccurrenceModel]:
@@ -423,22 +468,213 @@ class AuditReport:
     def get_results_by_standard(self, standard: str) -> List[CheckResult]:
         return [r for r in self.results if r.standard.upper() == standard.upper()]
 
-    def get_category_counts(self, standard: str) -> Dict[str, Dict[str, int]]:
-        """Returns {category_name: {'passed': X, 'warned': Y, 'failed': Z, 'manual': W}}"""
-        counts: Dict[str, Dict[str, int]] = {}
-        for r in self.get_results_by_standard(standard):
-            if r.category not in counts:
-                counts[r.category] = {"passed": 0, "warned": 0, "failed": 0, "manual": 0}
-            cnt = r.items_count if (hasattr(r, "items_count") and r.items_count is not None) else 1
-            if r.status == CheckStatus.PASS:
-                counts[r.category]["passed"] += cnt
-            elif r.status == CheckStatus.WARNING:
-                counts[r.category]["warned"] += cnt
-            elif r.status in (CheckStatus.FAIL, CheckStatus.ERROR):
-                counts[r.category]["failed"] += cnt
-            elif r.status == CheckStatus.MANUAL_REVIEW:
-                counts[r.category]["manual"] += cnt
-        return counts
+    PAC_PDFUA_CATEGORIES = [
+        "PDF Syntax (ISO 32000-1)",
+        "Fonts",
+        "Content",
+        "Embedded Files",
+        "Natural language",
+        "Structure elements",
+        "Structure tree",
+        "Role mapping",
+        "Alternative Descriptions",
+        "Metadata",
+        "Document settings",
+    ]
+
+    PAC_WCAG_CATEGORIES = [
+        "1.1 Text Alternatives",
+        "1.2 Time-based Media",
+        "1.3 Adaptable",
+        "1.4 Distinguishable",
+        "2.1 Keyboard Accessible",
+        "2.2 Enough Time",
+        "2.3 Seizures and Physical Reactions",
+        "2.4 Navigable",
+        "2.5 Input Modalities",
+        "3.1 Readable",
+        "3.2 Predictable",
+        "3.3 Input Assistance",
+        "4.1 Compatible",
+    ]
+
+    PAC_QUALITY_CATEGORIES = [
+        "Validity of document title",
+        "Artifacted content on page body",
+        "Tagged text consists of only whitespace",
+        "Tagged content exists outside of the page boundaries",
+        "Presence of headings",
+        "Presence of bookmarks (document outline) if there are headings",
+        '"TOCI" elements contain "Link" elements',
+        '"TOCI" elements correctly linked to headings',
+        "Alternative text on text elements",
+        'Completeness of "Link" elements',
+        'Formal correctness of "LI" elements',
+        'Completeness of "Table" elements',
+        '"Note" elements are referenced',
+        '"Note" elements contain "Lbl" elements',
+        '"P" elements contain "Note" elements',
+    ]
+
+    PAC_AI_CATEGORIES = [
+        "Classification of the elements",
+        "Unrecognized structural elements",
+        "Missing structural elements",
+    ]
+
+    AI_RULE_MAPPINGS = {
+        "Classification of the elements": ["AI-ALT-001", "QUAL-TEXT-001", "PDFUA-FIGURE-001", "PDFUA-FIGURE-002"],
+        "Unrecognized structural elements": ["AI-READ-001", "PDFUA-ROLE-001", "PDFUA-STRUCT-003"],
+        "Missing structural elements": ["AI-OUTLINE-001", "PDFUA-CONTENT-002", "QUAL-HEAD-001"],
+    }
+
+    QUALITY_RULE_MAPPINGS = {
+        "Validity of document title": ["PDFUA-META-002"],
+        "Artifacted content on page body": ["QUAL-ART-001"],
+        "Tagged text consists of only whitespace": ["QUAL-WHITE-001"],
+        "Tagged content exists outside of the page boundaries": ["QUAL-BOUND-001"],
+        "Presence of headings": ["QUAL-HEAD-001"],
+        "Presence of bookmarks (document outline) if there are headings": ["PDFUA-SETTINGS-003"],
+        '"TOCI" elements contain "Link" elements': ["QUAL-TOC-001"],
+        '"TOCI" elements correctly linked to headings': ["QUAL-TOC-002"],
+        "Alternative text on text elements": ["QUAL-TEXT-001"],
+        'Completeness of "Link" elements': ["QUAL-LINK-002"],
+        'Formal correctness of "LI" elements': ["PDFUA-LIST-001"],
+        'Completeness of "Table" elements': ["QUAL-TABLE-001"],
+        '"Note" elements are referenced': ["QUAL-NOTE-001"],
+        '"Note" elements contain "Lbl" elements': ["QUAL-NOTE-002"],
+        '"P" elements contain "Note" elements': ["QUAL-NOTE-003"],
+    }
+
+    def get_category_counts(self, standard: str, pac_mapped: bool = True) -> Dict[str, Dict[str, int]]:
+        """Returns {category_name: {'passed': X, 'warned': Y, 'failed': Z, 'manual': W}} mapped to PAC categories."""
+        std_up = standard.upper()
+        if not pac_mapped:
+            counts: Dict[str, Dict[str, int]] = {}
+            for r in self.get_results_by_standard(standard):
+                if r.category not in counts:
+                    counts[r.category] = {"passed": 0, "warned": 0, "failed": 0, "manual": 0}
+                cnt = r.items_count if (hasattr(r, "items_count") and r.items_count is not None) else 1
+                if r.status == CheckStatus.PASS:
+                    counts[r.category]["passed"] += cnt
+                elif r.status == CheckStatus.WARNING:
+                    counts[r.category]["warned"] += cnt
+                elif r.status in (CheckStatus.FAIL, CheckStatus.ERROR):
+                    counts[r.category]["failed"] += cnt
+                elif r.status == CheckStatus.MANUAL_REVIEW:
+                    counts[r.category]["manual"] += cnt
+            return counts
+
+        if std_up in ("PDF/UA", "PDFUA"):
+            counts = {c: {"passed": 0, "warned": 0, "failed": 0, "manual": 0} for c in self.PAC_PDFUA_CATEGORIES}
+            pdfua_map = {
+                "Tables": "Structure elements",
+                "Forms": "Structure elements",
+                "Artifacts": "Content",
+                "Syntax": "PDF Syntax (ISO 32000-1)",
+                "PDF Syntax": "PDF Syntax (ISO 32000-1)",
+            }
+            seen_unembedded_fonts = set()
+            for r in self.get_results_by_standard("PDF/UA"):
+                if r.check_id == "PDFUA-SETTINGS-003":
+                    continue
+                target = pdfua_map.get(r.category, r.category)
+                if r.category == "Annotations":
+                    target = "Document settings" if r.check_id == "PDFUA-ANNOT-002" else "Content"
+                elif r.check_id.startswith("PDFUA-UNICODE-"):
+                    target = "Natural language"
+                if target not in counts:
+                    target = "Content"
+
+                if target == "Fonts" and r.check_id == "PDFUA-FONT-001" and r.status in (CheckStatus.FAIL, CheckStatus.ERROR):
+                    font_key = r.object_reference or r.message
+                    if font_key in seen_unembedded_fonts:
+                        continue
+                    seen_unembedded_fonts.add(font_key)
+
+                cnt = r.items_count if (hasattr(r, "items_count") and r.items_count is not None) else 1
+                if r.status == CheckStatus.PASS:
+                    counts[target]["passed"] += cnt
+                elif r.status == CheckStatus.WARNING:
+                    counts[target]["warned"] += cnt
+                elif r.status in (CheckStatus.FAIL, CheckStatus.ERROR):
+                    counts[target]["failed"] += cnt
+                elif r.status == CheckStatus.MANUAL_REVIEW:
+                    counts[target]["manual"] += cnt
+            return counts
+
+        elif std_up == "QUALITY":
+            counts = {c: {"passed": 0, "warned": 0, "failed": 0, "manual": 0} for c in self.PAC_QUALITY_CATEGORIES}
+            for cat, rule_ids in self.QUALITY_RULE_MAPPINGS.items():
+                cat_results = [r for r in self.results if r.check_id in rule_ids]
+                p = sum(r.items_count for r in cat_results if r.status == CheckStatus.PASS)
+                w = sum(r.items_count for r in cat_results if r.status == CheckStatus.WARNING)
+                f = sum(r.items_count for r in cat_results if r.status in (CheckStatus.FAIL, CheckStatus.ERROR))
+                m = sum(r.items_count for r in cat_results if r.status == CheckStatus.MANUAL_REVIEW)
+                counts[cat] = {"passed": p, "warned": w, "failed": f, "manual": m}
+            return counts
+
+        elif std_up == "WCAG":
+            counts = {c: {"passed": 0, "warned": 0, "failed": 0, "manual": 0} for c in self.PAC_WCAG_CATEGORIES}
+            for r in self.get_results_by_standard("WCAG"):
+                cat = r.category
+                if cat not in counts:
+                    matched = False
+                    for w_cat in self.PAC_WCAG_CATEGORIES:
+                        if cat.startswith(w_cat[:3]) or w_cat.startswith(cat[:3]):
+                            cat = w_cat
+                            matched = True
+                            break
+                    if not matched:
+                        counts[cat] = {"passed": 0, "warned": 0, "failed": 0, "manual": 0}
+                cnt = r.items_count if (hasattr(r, "items_count") and r.items_count is not None) else 1
+                if r.status == CheckStatus.PASS:
+                    counts[cat]["passed"] += cnt
+                elif r.status == CheckStatus.WARNING:
+                    counts[cat]["warned"] += cnt
+                elif r.status in (CheckStatus.FAIL, CheckStatus.ERROR):
+                    counts[cat]["failed"] += cnt
+                elif r.status == CheckStatus.MANUAL_REVIEW:
+                    counts[cat]["manual"] += cnt
+            return counts
+
+        elif std_up == "AI":
+            counts = {c: {"passed": 0, "warned": 0, "failed": 0, "manual": 0} for c in self.PAC_AI_CATEGORIES}
+            ai_results = self.get_results_by_standard("AI")
+            cat_ai_map = {
+                "AI Alt-Text Evaluation": "Classification of the elements",
+                "Cognitive Accessibility": "Unrecognized structural elements",
+                "Structural AI": "Missing structural elements",
+                "Classification of the elements": "Classification of the elements",
+                "Unrecognized structural elements": "Unrecognized structural elements",
+                "Missing structural elements": "Missing structural elements",
+            }
+            if ai_results:
+                for r in ai_results:
+                    target_cat = cat_ai_map.get(r.category, "Classification of the elements")
+                    if target_cat not in counts:
+                        target_cat = "Classification of the elements"
+                    cnt = r.items_count if (hasattr(r, "items_count") and r.items_count is not None) else 1
+                    if r.status == CheckStatus.PASS:
+                        counts[target_cat]["passed"] += cnt
+                    elif r.status == CheckStatus.WARNING:
+                        counts[target_cat]["warned"] += cnt
+                    elif r.status in (CheckStatus.FAIL, CheckStatus.ERROR):
+                        counts[target_cat]["failed"] += cnt
+                    elif r.status == CheckStatus.MANUAL_REVIEW:
+                        counts[target_cat]["manual"] += cnt
+            else:
+                for cat, rule_ids in self.AI_RULE_MAPPINGS.items():
+                    cat_results = [r for r in self.results if r.check_id in rule_ids]
+                    p = sum(r.items_count for r in cat_results if r.status == CheckStatus.PASS)
+                    w = sum(r.items_count for r in cat_results if r.status == CheckStatus.WARNING)
+                    f = sum(r.items_count for r in cat_results if r.status in (CheckStatus.FAIL, CheckStatus.ERROR))
+                    m = sum(r.items_count for r in cat_results if r.status == CheckStatus.MANUAL_REVIEW)
+                    counts[cat] = {"passed": p, "warned": w, "failed": f, "manual": m}
+            return counts
+
+        else:
+            return self.get_category_counts(standard, pac_mapped=False)
 
     @property
     def total_passed(self) -> int:

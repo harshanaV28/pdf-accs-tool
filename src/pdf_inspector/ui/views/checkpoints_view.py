@@ -114,7 +114,8 @@ class CheckpointTableWidget(QTableWidget):
             # Failed column
             item_f = self.item(row, 3)
             if item_f:
-                item_f.setText(str(f) if f > 0 else "-")
+                is_zero_display = (cat == "2.3 Seizures and Physical Reactions" and f == 0)
+                item_f.setText("0" if is_zero_display else (str(f) if f > 0 else "-"))
                 if f > 0:
                     item_f.setForeground(QColor("#dc2626"))
                     item_f.setFont(QFont("Segoe UI", 10, QFont.Bold))
@@ -177,18 +178,17 @@ class CheckpointsView(QWidget):
 
     QUALITY_RULE_MAPPINGS = {
         "Validity of document title": ["PDFUA-META-002"],
-        "Artifacted content on page body": ["PDFUA-ART-003", "PDFUA-ARTIFACT-001", "PDFUA-CONTENT-004"],
-        "Tagged text consists of only whitespace": ["PDFUA-STRUCT-002"],
-        "Tagged content exists outside the page boundaries": ["QUAL-BOUND-001"],
+        "Artifacted content on page body": ["QUAL-ART-001"],
+        "Tagged text consists of only whitespace": ["QUAL-WHITE-001"],
+        "Tagged content exists outside of the page boundaries": ["QUAL-BOUND-001"],
         "Presence of headings": ["QUAL-HEAD-001"],
-        "Presence of bookmarks": ["PDFUA-SETTINGS-003"],
+        "Presence of bookmarks (document outline) if there are headings": ["PDFUA-SETTINGS-003"],
         '"TOCI" elements contain "Link" elements': ["QUAL-TOC-001"],
         '"TOCI" elements correctly linked to headings': ["QUAL-TOC-002"],
-        "Validity of alternative texts": ["PDFUA-ALT-001", "AI-ALT-001"],
         "Alternative text on text elements": ["QUAL-TEXT-001"],
-        'Completeness of "Link" elements': ["PDFUA-ANNOT-001", "QUAL-LINK-001"],
+        'Completeness of "Link" elements': ["QUAL-LINK-002"],
         'Formal correctness of "LI" elements': ["PDFUA-LIST-001"],
-        'Completeness of "Table" elements': ["PDFUA-TABLE-001", "QUAL-TABLE-001"],
+        'Completeness of "Table" elements': ["QUAL-TABLE-001"],
         '"Note" elements are referenced': ["QUAL-NOTE-001"],
         '"Note" elements contain "Lbl" elements': ["QUAL-NOTE-002"],
         '"P" elements contain "Note" elements': ["QUAL-NOTE-003"],
@@ -197,9 +197,9 @@ class CheckpointsView(QWidget):
     QUALITY_CATEGORIES = list(QUALITY_RULE_MAPPINGS.keys())
 
     AI_CATEGORIES = [
-        "AI Alt-Text Evaluation",
-        "Cognitive Accessibility",
-        "Structural AI",
+        "Classification of the elements",
+        "Unrecognized structural elements",
+        "Missing structural elements",
     ]
 
     def __init__(self, parent=None):
@@ -240,10 +240,8 @@ class CheckpointsView(QWidget):
         self.lbl_val_title = QLabel("-")
         self.lbl_val_title.setStyleSheet("color: #1e3a8a; font-weight: bold; font-size: 13px; background-color: #dbeafe; padding: 2px 6px; border-radius: 3px;")
 
-        lbl_t_author = QLabel("Author")
-        lbl_t_author.setStyleSheet("color: #64748b; font-size: 12px;")
+        # Retained for programmatic access but omitted from visible UI layout matching PAC 2026
         self.lbl_val_author = QLabel("-")
-        self.lbl_val_author.setStyleSheet("color: #0f172a; font-size: 13px;")
 
         lbl_t_fn = QLabel("Filename")
         lbl_t_fn.setStyleSheet("color: #64748b; font-size: 12px;")
@@ -272,18 +270,16 @@ class CheckpointsView(QWidget):
 
         meta_grid.addWidget(lbl_t_title, 0, 0)
         meta_grid.addWidget(self.lbl_val_title, 0, 1)
-        meta_grid.addWidget(lbl_t_author, 1, 0)
-        meta_grid.addWidget(self.lbl_val_author, 1, 1)
-        meta_grid.addWidget(lbl_t_fn, 2, 0)
-        meta_grid.addWidget(self.lbl_val_fn, 2, 1)
-        meta_grid.addWidget(lbl_t_lang, 3, 0)
-        meta_grid.addWidget(self.lbl_val_lang, 3, 1)
-        meta_grid.addWidget(lbl_t_pages, 4, 0)
-        meta_grid.addWidget(self.lbl_val_pages, 4, 1)
-        meta_grid.addWidget(lbl_t_tags, 5, 0)
-        meta_grid.addWidget(self.lbl_val_tags, 5, 1)
-        meta_grid.addWidget(lbl_t_size, 6, 0)
-        meta_grid.addWidget(self.lbl_val_size, 6, 1)
+        meta_grid.addWidget(lbl_t_fn, 1, 0)
+        meta_grid.addWidget(self.lbl_val_fn, 1, 1)
+        meta_grid.addWidget(lbl_t_lang, 2, 0)
+        meta_grid.addWidget(self.lbl_val_lang, 2, 1)
+        meta_grid.addWidget(lbl_t_pages, 3, 0)
+        meta_grid.addWidget(self.lbl_val_pages, 3, 1)
+        meta_grid.addWidget(lbl_t_tags, 4, 0)
+        meta_grid.addWidget(self.lbl_val_tags, 4, 1)
+        meta_grid.addWidget(lbl_t_size, 5, 0)
+        meta_grid.addWidget(self.lbl_val_size, 5, 1)
 
         h_layout.addLayout(meta_grid)
         h_layout.addStretch()
@@ -385,16 +381,7 @@ class CheckpointsView(QWidget):
         """Updates all tables, status banners, tab icons, and document metadata summary."""
         pdfua_counts = report.get_category_counts("PDF/UA")
         wcag_counts = report.get_category_counts("WCAG")
-        # Quality counts computed via aggregated findings mapping
-        quality_counts: Dict[str, Dict[str, int]] = {}
-        for cat, rule_ids in self.QUALITY_RULE_MAPPINGS.items():
-            cat_results = [r for r in report.results if r.check_id in rule_ids]
-            p = sum(r.items_count for r in cat_results if r.status == CheckStatus.PASS)
-            w = sum(r.items_count for r in cat_results if r.status == CheckStatus.WARNING)
-            f = sum(r.items_count for r in cat_results if r.status in (CheckStatus.FAIL, CheckStatus.ERROR))
-            m = sum(r.items_count for r in cat_results if r.status == CheckStatus.MANUAL_REVIEW)
-            quality_counts[cat] = {"passed": p, "warned": w, "failed": f, "manual": m}
-
+        quality_counts = report.get_category_counts("Quality")
         ai_counts = report.get_category_counts("AI")
 
         self.table_pdf_ua.update_counts(pdfua_counts)
@@ -412,10 +399,11 @@ class CheckpointsView(QWidget):
                 return "⚠️"
             return "✅"
 
+        ai_icon = _get_status_icon(ai_counts)
         self.tab_widget.setTabText(0, f"{_get_status_icon(pdfua_counts)} PDF/UA")
         self.tab_widget.setTabText(1, f"{_get_status_icon(wcag_counts)} WCAG")
         self.tab_widget.setTabText(2, f"{_get_status_icon(quality_counts)} Quality")
-        self.tab_widget.setTabText(3, "AI")
+        self.tab_widget.setTabText(3, f"{ai_icon} AI" if ai_icon != "✅" else "AI")
 
         # Compliance Banner
         pdfua_failed = sum(c["failed"] for c in pdfua_counts.values())
@@ -425,6 +413,24 @@ class CheckpointsView(QWidget):
         else:
             self.lbl_pdfua_banner.setText("This PDF file is PDF/UA compliant.")
             self.lbl_pdfua_banner.setStyleSheet("font-size: 13px; font-weight: bold; color: #15803d; padding: 4px 2px;")
+
+        quality_failed = sum(c.get("failed", 0) for c in quality_counts.values())
+        quality_warned = sum(c.get("warned", 0) for c in quality_counts.values())
+        if quality_failed > 0 or quality_warned > 0:
+            self.lbl_quality_banner.setText("This document has potential quality issues.")
+            self.lbl_quality_banner.setStyleSheet("font-size: 13px; font-weight: bold; color: #b45309; padding: 4px 2px;")
+        else:
+            self.lbl_quality_banner.setText("This document has no quality issues.")
+            self.lbl_quality_banner.setStyleSheet("font-size: 13px; font-weight: bold; color: #15803d; padding: 4px 2px;")
+
+        ai_failed = sum(c.get("failed", 0) for c in ai_counts.values())
+        ai_warned = sum(c.get("warned", 0) for c in ai_counts.values())
+        if ai_failed > 0 or ai_warned > 0:
+            self.lbl_ai_banner.setText("The AI has detected potential issues in this PDF document.")
+            self.lbl_ai_banner.setStyleSheet("font-size: 13px; font-weight: bold; color: #1e293b; padding: 4px 2px;")
+        else:
+            self.lbl_ai_banner.setText("This document has no AI issues.")
+            self.lbl_ai_banner.setStyleSheet("font-size: 13px; font-weight: bold; color: #15803d; padding: 4px 2px;")
 
         # Update metadata card if doc model provided
         if doc is not None:

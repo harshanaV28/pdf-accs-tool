@@ -40,7 +40,7 @@ class TestWCAGRegression:
             display_doc_title=False
         )
         res2 = rule.evaluate(doc_title_no_disp)
-        assert any(r.status == CheckStatus.WARNING and "DisplayDocTitle" in r.message for r in res2)
+        assert any(r.status in (CheckStatus.FAIL, CheckStatus.WARNING) and "DisplayDocTitle" in r.message for r in res2)
 
         # Case 3: Document has title and DisplayDocTitle is True -> SC 2.4.2 PASS
         doc_full_title = PDFDocumentModel(

@@ -7,7 +7,7 @@ from src.pdf_inspector.core.models import (
     PDFDocumentModel, PageModel, StructureNode, FontModel, ImageModel, CheckStatus
 )
 from src.pdf_inspector.engine.pdf_ua.syntax_rules import PDFSyntaxBasicRule
-from src.pdf_inspector.engine.pdf_ua.font_rules import FontEmbeddingRule
+from src.pdf_inspector.engine.pdf_ua.font_rules import FontEmbeddingRule, FontToUnicodeRule
 from src.pdf_inspector.engine.pdf_ua.content_rules import TaggedPDFRule
 from src.pdf_inspector.engine.pdf_ua.language_rules import DocumentLanguageRule
 from src.pdf_inspector.engine.pdf_ua.metadata_rules import MetadataCompletenessRule
@@ -93,6 +93,79 @@ def test_font_embedding_rule():
     res6 = rule.evaluate(doc6)
     assert all(r.status == CheckStatus.PASS for r in res6)
     assert res6[0].items_count == 2
+
+
+def test_font_tounicode_rule():
+    rule = FontToUnicodeRule()
+
+    # Case 1: Embedded font with valid Unicode mapping
+    f1_valid = FontModel("ABCDEF+Arial", "TrueType", is_embedded=True, is_subset=True, has_tounicode=True, encoding="Identity-H", pages=[1], is_used=True)
+    doc1 = PDFDocumentModel(filepath="", filename="f1.pdf", filesize=10, pdf_version="1.7", page_count=1, fonts=[f1_valid])
+    res1 = rule.evaluate(doc1)
+    assert len(res1) == 1
+    assert res1[0].status == CheckStatus.PASS
+    assert res1[0].items_count == 1
+
+    # Case 2: Embedded font with missing/invalid Unicode mapping
+    f2_invalid = FontModel("ABCDEF+Symbol", "Type1", is_embedded=True, is_subset=True, has_tounicode=False, encoding="Custom", pages=[1], is_used=True)
+    doc2 = PDFDocumentModel(filepath="", filename="f2.pdf", filesize=10, pdf_version="1.7", page_count=1, fonts=[f2_invalid])
+    res2 = rule.evaluate(doc2)
+    assert len(res2) == 1
+    assert res2[0].status == CheckStatus.WARNING
+    assert "lacks a valid Unicode mapping" in res2[0].message
+    assert res2[0].items_count == 1
+
+    # Case 3: Unembedded font with valid standard encoding (e.g. WinAnsiEncoding)
+    # Provides valid Unicode mapping via standard encoding, so no defect is flagged,
+    # but does not receive an embedded PDF/UA compliance PASS.
+    f3_winansi = FontModel("Arial", "TrueType", is_embedded=False, is_subset=False, has_tounicode=False, encoding="WinAnsiEncoding", pages=[1], is_used=True)
+    doc3 = PDFDocumentModel(filepath="", filename="f3.pdf", filesize=10, pdf_version="1.7", page_count=1, fonts=[f3_winansi])
+    res3 = rule.evaluate(doc3)
+    assert len(res3) == 0
+
+    # Case 4: Unembedded font with missing/invalid Unicode mapping (custom encoding, no ToUnicode)
+    # The genuine Unicode mapping defect is NOT suppressed despite font being unembedded!
+    f4_unemb_inv = FontModel("CustomFont", "TrueType", is_embedded=False, is_subset=False, has_tounicode=False, encoding="Custom", pages=[2], is_used=True)
+    doc4 = PDFDocumentModel(filepath="", filename="f4.pdf", filesize=10, pdf_version="1.7", page_count=2, fonts=[f4_unemb_inv])
+    res4 = rule.evaluate(doc4)
+    assert len(res4) == 1
+    assert res4[0].status == CheckStatus.WARNING
+    assert "lacks a valid Unicode mapping" in res4[0].message
+    assert res4[0].page == 2
+    assert res4[0].items_count == 1
+
+    # Case 5: Unused font resources (is_used=False) -> should NOT produce warnings or false passes
+    f5_unused = FontModel("UnusedFont", "Type1", is_embedded=False, is_subset=False, has_tounicode=False, encoding="Custom", pages=[1], is_used=False)
+    doc5 = PDFDocumentModel(filepath="", filename="f5.pdf", filesize=10, pdf_version="1.7", page_count=1, fonts=[f5_unused])
+    res5 = rule.evaluate(doc5)
+    assert len(res5) == 0
+
+    # Case 6: Used Type 0 font with Identity-H and no /ToUnicode -> must report defect (Matterhorn 14-003)
+    f6_identity_h_no_tounicode = FontModel(
+        "Type0IdentityH", "Type0", is_embedded=True, is_subset=True,
+        has_tounicode=False, encoding="Identity-H", pages=[1], is_used=True
+    )
+    doc6 = PDFDocumentModel(
+        filepath="", filename="f6.pdf", filesize=10, pdf_version="1.7",
+        page_count=1, fonts=[f6_identity_h_no_tounicode]
+    )
+    res6 = rule.evaluate(doc6)
+    assert len(res6) == 1
+    assert res6[0].status == CheckStatus.WARNING
+    assert "lacks a valid Unicode mapping" in res6[0].message
+    assert res6[0].items_count == 1
+
+    # Case 7: Unused Type 0 font with Identity-H and no /ToUnicode -> should NOT produce findings
+    f7_unused_identity_h = FontModel(
+        "Type0UnusedIdentityH", "Type0", is_embedded=True, is_subset=True,
+        has_tounicode=False, encoding="Identity-H", pages=[1], is_used=False
+    )
+    doc7 = PDFDocumentModel(
+        filepath="", filename="f7.pdf", filesize=10, pdf_version="1.7",
+        page_count=1, fonts=[f7_unused_identity_h]
+    )
+    res7 = rule.evaluate(doc7)
+    assert len(res7) == 0
 
 
 def test_language_rule():
@@ -494,3 +567,66 @@ def test_figure_bounding_box_comprehensive_matrix():
     assert any(r.status == CheckStatus.FAIL and "lacks a BBox attribute for each page" in r.message for r in res11)
 
 
+def test_unicode_pua_rule_synthetic():
+    """Verify standards-compliant evaluation of Unicode Private Use Area characters."""
+    from src.pdf_inspector.engine.pdf_ua.unicode_rules import UnicodePUARule
+    from src.pdf_inspector.core.models import ArtifactOccurrenceModel
+    rule = UnicodePUARule()
+
+    # Case 1: Unexempt PUA in regular P node without ActualText -> WARNING
+    p_bad = StructureNode("p1", "P", "P", page=1, text_content="Custom icon \uE001 in paragraph")
+    root1 = StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[p_bad])
+    p_bad.parent = root1
+    doc1 = PDFDocumentModel(filepath="", filename="pua1.pdf", filesize=100, pdf_version="1.7", page_count=1, is_tagged=True, structure_tree=root1)
+    res1 = rule.evaluate(doc1)
+    assert len(res1) == 1
+    assert res1[0].status == CheckStatus.WARNING
+    assert "0xe001" in res1[0].message
+
+    # Case 2: PUA inside Formula element -> PASS (ISO 14289-1 Clause 7.2 & 7.5 math exception)
+    formula_node = StructureNode("form1", "Formula", "Formula", page=1, text_content="E = mc\uF8FF")
+    root2 = StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[formula_node])
+    formula_node.parent = root2
+    doc2 = PDFDocumentModel(filepath="", filename="pua2.pdf", filesize=100, pdf_version="1.7", page_count=1, is_tagged=True, structure_tree=root2)
+    res2 = rule.evaluate(doc2)
+    assert all(r.status == CheckStatus.PASS for r in res2)
+
+    # Case 3: PUA with ActualText directly on node -> PASS
+    p_actual = StructureNode("p2", "Span", "Span", page=1, text_content="\uE002", actual_text="Star Rating")
+    root3 = StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[p_actual])
+    p_actual.parent = root3
+    doc3 = PDFDocumentModel(filepath="", filename="pua3.pdf", filesize=100, pdf_version="1.7", page_count=1, is_tagged=True, structure_tree=root3)
+    res3 = rule.evaluate(doc3)
+    assert all(r.status == CheckStatus.PASS for r in res3)
+
+    # Case 4: PUA with ActualText on parent node -> PASS
+    parent_actual = StructureNode("p_par", "P", "P", page=1, actual_text="Checkmark List Item")
+    child_pua = StructureNode("span1", "Span", "Span", page=1, text_content="\uE005")
+    parent_actual.children.append(child_pua)
+    child_pua.parent = parent_actual
+    root4 = StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[parent_actual])
+    parent_actual.parent = root4
+    doc4 = PDFDocumentModel(filepath="", filename="pua4.pdf", filesize=100, pdf_version="1.7", page_count=1, is_tagged=True, structure_tree=root4)
+    res4 = rule.evaluate(doc4)
+    assert all(r.status == CheckStatus.PASS for r in res4)
+
+    # Case 5: PUA marked as Artifact -> PASS
+    art_node = StructureNode("art1", "Span", "Span", page=1, text_content="\uE010", is_artifact=True)
+    root5 = StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[art_node])
+    art_node.parent = root5
+    doc5 = PDFDocumentModel(filepath="", filename="pua5.pdf", filesize=100, pdf_version="1.7", page_count=1, is_tagged=True, structure_tree=root5)
+    res5 = rule.evaluate(doc5)
+    assert all(r.status == CheckStatus.PASS for r in res5)
+
+    # Case 6: Untagged document with PUA covered by Artifact -> PASS
+    art1 = ArtifactOccurrenceModel(page_number=1, is_inside_tagged=False, text_snippet="\uE008")
+    pg1 = PageModel(page_number=1, width=612, height=792, text="Bullet \uE008 item", artifacts=[art1])
+    doc6 = PDFDocumentModel(filepath="", filename="pua6.pdf", filesize=100, pdf_version="1.7", page_count=1, is_tagged=False, structure_tree=None, pages=[pg1])
+    res6 = rule.evaluate(doc6)
+    assert all(r.status == CheckStatus.PASS for r in res6)
+
+    # Case 7: Untagged document with PUA NOT covered by Artifact -> WARNING
+    pg2 = PageModel(page_number=1, width=612, height=792, text="Uncovered \uE009 item")
+    doc7 = PDFDocumentModel(filepath="", filename="pua7.pdf", filesize=100, pdf_version="1.7", page_count=1, is_tagged=False, structure_tree=None, pages=[pg2])
+    res7 = rule.evaluate(doc7)
+    assert any(r.status == CheckStatus.WARNING and "0xe009" in r.message for r in res7)

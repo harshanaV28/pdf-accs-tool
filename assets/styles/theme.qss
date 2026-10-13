@@ -4,12 +4,12 @@ QMainWindow {
     background-color: #f8fafc;
     color: #0f172a;
     font-family: "Segoe UI", -apple-system, Roboto, sans-serif;
-    font-size: 13px;
+    font-size: 10pt;
 }
 
 QWidget {
     font-family: "Segoe UI", -apple-system, Roboto, sans-serif;
-    font-size: 13px;
+    font-size: 10pt;
     color: #1e293b;
 }
 
@@ -167,6 +167,38 @@ QLineEdit {
 
 QLineEdit:focus {
     border-color: #3b82f6;
+    outline: none;
+}
+
+/* Combo Boxes */
+QComboBox {
+    background-color: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 5px 10px;
+    color: #0f172a;
+    font-size: 10pt;
+}
+
+QComboBox:focus {
+    border-color: #3b82f6;
+    outline: none;
+}
+
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 20px;
+    border-left: none;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #ffffff;
+    border: 1px solid #cbd5e1;
+    selection-background-color: #eff6ff;
+    selection-color: #1d4ed8;
+    color: #0f172a;
+    font-size: 10pt;
     outline: none;
 }
 

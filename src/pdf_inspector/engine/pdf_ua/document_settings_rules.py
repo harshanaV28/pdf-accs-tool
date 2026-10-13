@@ -82,5 +82,6 @@ class BookmarkStructureRule(BaseRule):
             return [self.create_result(
                 status=CheckStatus.PASS,
                 message=f"Document has {doc.page_count} pages; bookmarks are optional for documents with 20 or fewer pages.",
-                evidence=f"Page count: {doc.page_count} (<= 20 pages threshold)"
+                evidence=f"Page count: {doc.page_count} (<= 20 pages threshold)",
+                items_count=0
             )]

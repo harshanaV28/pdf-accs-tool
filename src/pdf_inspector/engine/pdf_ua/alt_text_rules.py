@@ -25,12 +25,8 @@ class FigureAlternativeTextRule(BaseRule):
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
         results = []
-        if not doc.structure_tree:
-            return [self.create_result(
-                status=CheckStatus.WARNING,
-                message="Cannot verify figure alternate descriptions because document is untagged.",
-                evidence="No structure tree available."
-            )]
+        if not doc.is_tagged or not doc.structure_tree:
+            return results
 
         figure_nodes = doc.structure_tree.find_all_by_standard_tag("Figure")
         formula_nodes = doc.structure_tree.find_all_by_standard_tag("Formula")

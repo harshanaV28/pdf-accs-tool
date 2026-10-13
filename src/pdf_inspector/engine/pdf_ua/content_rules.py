@@ -26,12 +26,14 @@ class TaggedPDFRule(BaseRule):
                 evidence="Catalog /MarkInfo /Marked is true and /StructTreeRoot exists."
             )]
 
+        has_content = bool(doc.images or any(p.text.strip() for p in doc.pages))
         return [self.create_result(
             status=CheckStatus.FAIL,
             message="Document is NOT a Tagged PDF. Assistive technologies cannot determine reading order or semantics.",
             evidence=f"is_tagged: {doc.is_tagged}, StructTreeRoot present: {doc.structure_tree is not None}",
             custom_severity=Severity.CRITICAL,
-            custom_remediation="Tag the document using an accessible PDF authoring tool or Adobe Acrobat Pro's 'Autotag Document' feature."
+            custom_remediation="Tag the document using an accessible PDF authoring tool or Adobe Acrobat Pro's 'Autotag Document' feature.",
+            items_count=0 if has_content else 1
         )]
 
 
@@ -47,6 +49,16 @@ class ContentTaggedRule(BaseRule):
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
         results = []
         if not doc.is_tagged:
+            total_untagged = len(doc.images) + sum(len(p.text.splitlines()) for p in doc.pages if p.text.strip())
+            if total_untagged > 0:
+                results.append(self.create_result(
+                    status=CheckStatus.FAIL,
+                    message=f"Document is untagged: {total_untagged} real content element(s) are not tagged in the structure tree (Matterhorn 01-001).",
+                    evidence=f"Total untagged content elements: {total_untagged} ({len(doc.images)} image(s)) across {doc.page_count} page(s).",
+                    custom_severity=Severity.HIGH,
+                    custom_remediation="Tag the document using an accessible PDF creator or Acrobat Pro Autotag Document.",
+                    items_count=total_untagged
+                ))
             return results
 
         # 1. Check pages with unmarked real content operations

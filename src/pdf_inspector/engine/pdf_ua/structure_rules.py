@@ -77,14 +77,7 @@ class StructureTreeIntegrityRule(BaseRule):
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
         results = []
-        if not doc.structure_tree:
-            results.append(self.create_result(
-                status=CheckStatus.FAIL,
-                message="No StructTreeRoot exists in the document (Matterhorn 14-001).",
-                evidence="StructTreeRoot is missing from Catalog.",
-                custom_severity=Severity.CRITICAL,
-                custom_remediation="Add structural tags to the document using an accessible PDF creator or Acrobat Pro."
-            ))
+        if not doc.is_tagged or not doc.structure_tree:
             return results
 
         root_children = doc.structure_tree.children

@@ -95,14 +95,14 @@ class PDFReportGenerator:
 
         meta_data = [
             [
-                Paragraph("<b>File Name:</b>", cell_style),
-                Paragraph(html.escape(str(d_info.get("filename", ""))), cell_style),
+                Paragraph("<b>Document Title:</b>", cell_style),
+                Paragraph(html.escape(str(d_info.get("title", "Untitled"))), cell_style),
                 Paragraph("<b>Compliance Score:</b>", cell_style),
                 Paragraph(f"<font color='{score_hex}'><b>{score}%</b></font>", cell_bold)
             ],
             [
-                Paragraph("<b>Document Title:</b>", cell_style),
-                Paragraph(html.escape(str(d_info.get("title", "Untitled"))), cell_style),
+                Paragraph("<b>Filename:</b>", cell_style),
+                Paragraph(html.escape(str(d_info.get("filename", ""))), cell_style),
                 Paragraph("<b>PDF Version:</b>", cell_style),
                 Paragraph(html.escape(str(d_info.get("pdf_version", "1.7"))), cell_style)
             ],
@@ -113,8 +113,8 @@ class PDFReportGenerator:
                 Paragraph(html.escape(str(d_info.get("language", "Not specified"))), cell_style)
             ],
             [
-                Paragraph("<b>Tagged PDF:</b>", cell_style),
-                Paragraph("Yes" if d_info.get("is_tagged") else "<font color='#ef4444'><b>No</b></font>", cell_style),
+                Paragraph("<b>Tags:</b>", cell_style),
+                Paragraph(str(d_info.get("tags_count", 0)), cell_bold),
                 Paragraph("<b>PDF/UA Declared:</b>", cell_style),
                 Paragraph("Yes" if d_info.get("pdfua_declared") else "No", cell_style)
             ],
@@ -163,10 +163,10 @@ class PDFReportGenerator:
         story.append(Spacer(1, 14))
 
         # 4. Standards Summary Table
-        story.append(Paragraph("Standards Evaluation Summary", h2_style))
+        story.append(Paragraph("Standards Evaluation Summary (PAC Compliance Matrix)", h2_style))
         summary_rows = [
             [
-                Paragraph("<b>Standard</b>", cell_bold),
+                Paragraph("<b>Standard / Section</b>", cell_bold),
                 Paragraph("<b>Checkpoint Category</b>", cell_bold),
                 Paragraph("<b>Passed</b>", cell_bold),
                 Paragraph("<b>Warned</b>", cell_bold),
@@ -175,23 +175,95 @@ class PDFReportGenerator:
             ]
         ]
 
-        for std in ["PDF/UA", "WCAG", "Quality", "AI"]:
-            cat_counts = report.get_category_counts(std)
-            for cat, counts in cat_counts.items():
+        # Define PAC section groupings for PDF/UA
+        pdfua_groups = {
+            "Basic Requirements": [
+                "PDF Syntax (ISO 32000-1)",
+                "Fonts",
+                "Content",
+                "Embedded Files",
+                "Natural language",
+            ],
+            "Logical structure": [
+                "Structure elements",
+                "Structure tree",
+                "Role mapping",
+                "Alternative Descriptions",
+            ],
+            "Metadata and Settings": [
+                "Metadata",
+                "Document settings",
+            ],
+        }
+
+        pdfua_counts = report.get_category_counts("PDF/UA")
+        for group_name, cats in pdfua_groups.items():
+            for idx, cat in enumerate(cats):
+                counts = pdfua_counts.get(cat, {"passed": 0, "warned": 0, "failed": 0, "manual": 0})
                 p_c = counts['passed']
                 w_c = counts['warned']
                 f_c = counts['failed']
                 m_c = counts['manual']
+                sec_label = f"<b>PDF/UA</b><br/><font color='#64748b'>{group_name}</font>" if idx == 0 else ""
                 summary_rows.append([
-                    Paragraph(html.escape(std), cell_style),
+                    Paragraph(sec_label, cell_style),
                     Paragraph(html.escape(cat), cell_style),
-                    Paragraph(f"<font color='#166534'>{p_c}</font>", cell_style),
-                    Paragraph(f"<font color='#92400e'>{w_c}</font>" if w_c else "0", cell_style),
-                    Paragraph(f"<font color='#991b1b'><b>{f_c}</b></font>" if f_c else "0", cell_style),
-                    Paragraph(f"<font color='#075985'>{m_c}</font>" if m_c else "0", cell_style),
+                    Paragraph(f"<font color='#166534'><b>{p_c}</b></font>" if p_c else "<font color='#94a3b8'>-</font>", cell_style),
+                    Paragraph(f"<font color='#92400e'><b>{w_c}</b></font>" if w_c else "<font color='#94a3b8'>-</font>", cell_style),
+                    Paragraph(f"<font color='#991b1b'><b>{f_c}</b></font>" if f_c else "<font color='#94a3b8'>-</font>", cell_style),
+                    Paragraph(f"<font color='#075985'><b>{m_c}</b></font>" if m_c else "<font color='#94a3b8'>-</font>", cell_style),
                 ])
 
-        sum_table = Table(summary_rows, colWidths=[70, 230, 60, 60, 60, 60])
+        wcag_counts = report.get_category_counts("WCAG")
+        for idx, (cat, counts) in enumerate(wcag_counts.items()):
+            p_c = counts['passed']
+            w_c = counts['warned']
+            f_c = counts['failed']
+            m_c = counts['manual']
+            is_zero_fail = (cat == "2.3 Seizures and Physical Reactions" and f_c == 0)
+            f_display = f"<font color='#991b1b'><b>{f_c}</b></font>" if f_c else ("<font color='#64748b'>0</font>" if is_zero_fail else "<font color='#94a3b8'>-</font>")
+            summary_rows.append([
+                Paragraph(sec_label, cell_style),
+                Paragraph(html.escape(cat), cell_style),
+                Paragraph(f"<font color='#166534'><b>{p_c}</b></font>" if p_c else "<font color='#94a3b8'>-</font>", cell_style),
+                Paragraph(f"<font color='#92400e'><b>{w_c}</b></font>" if w_c else "<font color='#94a3b8'>-</font>", cell_style),
+                Paragraph(f_display, cell_style),
+                Paragraph(f"<font color='#075985'><b>{m_c}</b></font>" if m_c else "<font color='#94a3b8'>-</font>", cell_style),
+            ])
+
+        quality_counts = report.get_category_counts("Quality")
+        for idx, (cat, counts) in enumerate(quality_counts.items()):
+            p_c = counts['passed']
+            w_c = counts['warned']
+            f_c = counts['failed']
+            m_c = counts['manual']
+            sec_label = "<b>Quality</b><br/><font color='#64748b'>PAC Matrix</font>" if idx == 0 else ""
+            summary_rows.append([
+                Paragraph(sec_label, cell_style),
+                Paragraph(html.escape(cat), cell_style),
+                Paragraph(f"<font color='#166534'><b>{p_c}</b></font>" if p_c else "<font color='#94a3b8'>-</font>", cell_style),
+                Paragraph(f"<font color='#92400e'><b>{w_c}</b></font>" if w_c else "<font color='#94a3b8'>-</font>", cell_style),
+                Paragraph(f"<font color='#991b1b'><b>{f_c}</b></font>" if f_c else "<font color='#94a3b8'>-</font>", cell_style),
+                Paragraph(f"<font color='#075985'><b>{m_c}</b></font>" if m_c else "<font color='#94a3b8'>-</font>", cell_style),
+            ])
+
+        ai_counts = report.get_category_counts("AI")
+        for idx, (cat, counts) in enumerate(ai_counts.items()):
+            p_c = counts['passed']
+            w_c = counts['warned']
+            f_c = counts['failed']
+            m_c = counts['manual']
+            sec_label = "<b>AI</b><br/><font color='#64748b'>Analysis</font>" if idx == 0 else ""
+            summary_rows.append([
+                Paragraph(sec_label, cell_style),
+                Paragraph(html.escape(cat), cell_style),
+                Paragraph(f"<font color='#166534'><b>{p_c}</b></font>" if p_c else "<font color='#94a3b8'>-</font>", cell_style),
+                Paragraph(f"<font color='#92400e'><b>{w_c}</b></font>" if w_c else "<font color='#94a3b8'>-</font>", cell_style),
+                Paragraph(f"<font color='#991b1b'><b>{f_c}</b></font>" if f_c else "<font color='#94a3b8'>-</font>", cell_style),
+                Paragraph(f"<font color='#075985'><b>{m_c}</b></font>" if m_c else "<font color='#94a3b8'>-</font>", cell_style),
+            ])
+
+        sum_table = Table(summary_rows, colWidths=[90, 210, 60, 60, 60, 60], repeatRows=1)
         sum_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f8fafc')),
             ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#e2e8f0')),
@@ -204,6 +276,8 @@ class PDFReportGenerator:
 
         # 5. Detailed Problem Findings (Failures and Warnings)
         problems = [r for r in report.results if r.status in (CheckStatus.FAIL, CheckStatus.WARNING, CheckStatus.ERROR)]
+        if problems:
+            story.append(PageBreak())
         story.append(Paragraph(f"Detailed Issues & Remediation Action Items ({len(problems)})", h2_style))
 
         if not problems:
@@ -238,7 +312,7 @@ class PDFReportGenerator:
                     Paragraph(desc_text, cell_style),
                 ])
 
-            prob_table = Table(prob_rows, colWidths=[65, 95, 65, 30, 285])
+            prob_table = Table(prob_rows, colWidths=[65, 95, 65, 30, 285], repeatRows=1)
             prob_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f8fafc')),
                 ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#e2e8f0')),

@@ -40,10 +40,12 @@ class ListStructureHierarchyRule(BaseRule):
                     custom_remediation="Restructure the list so each item is enclosed in an <LI> containing <Lbl> (bullet/number) and <LBody> (text)."
                 ))
         else:
+            total_li = sum(l.items_count for l in doc.lists) if doc.lists else len(doc.lists)
             results.append(self.create_result(
                 status=CheckStatus.PASS,
-                message=f"All {len(doc.lists)} list(s) conform to ISO standard structural list hierarchies.",
-                evidence=f"Total valid lists: {len(doc.lists)}"
+                message=f"All {len(doc.lists)} list(s) ({total_li} list item(s)) conform to ISO standard structural list hierarchies.",
+                evidence=f"Total valid list items: {total_li}",
+                items_count=total_li
             ))
 
         return results

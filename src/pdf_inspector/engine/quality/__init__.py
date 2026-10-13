@@ -12,6 +12,9 @@ from .quality_rules import (
     NoteReferencedQualityRule,
     NoteContainsLabelQualityRule,
     ParagraphContainsNoteQualityRule,
+    ArtifactedContentOnPageBodyRule,
+    LinkCompletenessQualityRule,
+    TaggedTextOnlyWhitespaceQualityRule,
 )
 
 QUALITY_RULES = [
@@ -26,6 +29,9 @@ QUALITY_RULES = [
     NoteReferencedQualityRule(),
     NoteContainsLabelQualityRule(),
     ParagraphContainsNoteQualityRule(),
+    ArtifactedContentOnPageBodyRule(),
+    LinkCompletenessQualityRule(),
+    TaggedTextOnlyWhitespaceQualityRule(),
 ]
 
 __all__ = [
@@ -41,4 +47,7 @@ __all__ = [
     "NoteReferencedQualityRule",
     "NoteContainsLabelQualityRule",
     "ParagraphContainsNoteQualityRule",
+    "ArtifactedContentOnPageBodyRule",
+    "LinkCompletenessQualityRule",
+    "TaggedTextOnlyWhitespaceQualityRule",
 ]

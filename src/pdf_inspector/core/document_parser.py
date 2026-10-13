@@ -15,7 +15,7 @@ import pymupdf
 from .models import (
     PDFDocumentModel, PageModel, StructureNode, FontModel,
     ImageModel, TableModel, ListModel, LinkModel, FormFieldModel,
-    AnnotationModel, BookmarkModel, ArtifactOccurrenceModel
+    AnnotationModel, BookmarkModel, ArtifactOccurrenceModel, FormXObjectModel
 )
 from .structure_tree import StructureTreeParser, resolve_role, parse_number_tree
 
@@ -222,9 +222,18 @@ class DocumentParser:
             page_artifact_xobjs: Dict[int, Set[str]] = {}
             xobject_artifact_cache: Dict[int, Tuple[int, List[str]]] = {}
 
+            parent_tree_map: Dict[int, Any] = {}
+            if "/StructTreeRoot" in pike_doc.Root and "/ParentTree" in pike_doc.Root["/StructTreeRoot"]:
+                try:
+                    parent_tree_map = parse_number_tree(pike_doc.Root["/StructTreeRoot"]["/ParentTree"])
+                except Exception as e:
+                    logger.debug(f"Error parsing parent tree: {e}")
+
+            font_cmap_cache: Dict[Any, Dict[int, str]] = {}
+
             STREAM_TOKEN_RE = re.compile(
-                r'(?P<bdc>/(\w+)\s+(<<.*?>>|/\w+)\s*BDC)'
-                r'|(?P<bmc>/(\w+)\s+BMC)'
+                r'(?P<bdc>/(\w+)\s*(<<.*?>>|/\w+)\s*BDC)'
+                r'|(?P<bmc>/(\w+)\s*BMC)'
                 r'|(?P<emc>\bEMC\b)'
                 r'|(?P<do>/(\w+)\s+Do\b)'
                 r'|(?P<text_tj>(?:\((?:\\.|[^()\\])*\)|\[(?:\\.|[^\]\\])*\])\s*(?:TJ|Tj|\'|"))'
@@ -250,6 +259,8 @@ class DocumentParser:
                 page_artifacts: List[ArtifactOccurrenceModel] = []
                 page_content_occs: List[ContentOccurrenceModel] = []
                 unmarked_count = 0
+                tagged_ops_count = 0
+                art_ops_count = 0
                 tagged_in_art_count = 0
                 art_in_tagged_count = 0
 
@@ -274,6 +285,26 @@ class DocumentParser:
 
                     if "/StructParents" in pike_page:
                         struct_parents_id = int(pike_page["/StructParents"])
+                        if struct_parents_id in parent_tree_map:
+                            pt_entry = parent_tree_map[struct_parents_id]
+                            if hasattr(pt_entry, "__len__"):
+                                for pt_idx, pt_val in enumerate(pt_entry):
+                                    if pt_val is not None and pt_idx not in mcids_found:
+                                        mcids_found.append(pt_idx)
+
+                    # Also collect MCIDs from Form XObjects on this page
+                    if "/Resources" in pike_page and "/XObject" in pike_page["/Resources"]:
+                        try:
+                            xo_dict = pike_page["/Resources"]["/XObject"]
+                            for _, xo in xo_dict.items():
+                                if hasattr(xo, "read_bytes"):
+                                    xo_stream = xo.read_bytes().decode("latin1", errors="ignore")
+                                    for xo_m in MCID_PATTERN.finditer(xo_stream):
+                                        x_mcid = int(xo_m.group(2))
+                                        if x_mcid not in mcids_found:
+                                            mcids_found.append(x_mcid)
+                        except Exception:
+                            pass
 
                     # Parse MCIDs, Artifacts, and marked content tokens from page contents stream
                     if "/Contents" in pike_page:
@@ -297,7 +328,7 @@ class DocumentParser:
 
                         for m in STREAM_TOKEN_RE.finditer(stream_text):
                             if m.group("bdc"):
-                                bdc_m = re.match(r"/(\w+)\s+(<<.*?>>|/\w+)\s*BDC", m.group("bdc"), re.DOTALL)
+                                bdc_m = re.match(r"/(\w+)\s*(<<.*?>>|/\w+)\s*BDC", m.group("bdc"), re.DOTALL)
                                 tag = bdc_m.group(1) if bdc_m else "Span"
                                 props = bdc_m.group(2) if bdc_m else ""
                                 mcid = None
@@ -342,7 +373,7 @@ class DocumentParser:
                                 stack.append({"tag": tag, "mcid": mcid, "is_artifact": is_art})
 
                             elif m.group("bmc"):
-                                bmc_m = re.match(r"/(\w+)\s+BMC", m.group("bmc"))
+                                bmc_m = re.match(r"/(\w+)\s*BMC", m.group("bmc"))
                                 tag = bmc_m.group(1) if bmc_m else "Span"
                                 is_art = (tag.lower() == "artifact")
                                 in_tagged = any(s["mcid"] is not None for s in stack)
@@ -376,7 +407,11 @@ class DocumentParser:
                                 tj_txt = m.group("text_tj")
                                 in_tagged = any(s["mcid"] is not None for s in stack)
                                 in_art = any(s["is_artifact"] for s in stack)
-                                if not in_tagged and not in_art:
+                                if in_tagged and not in_art:
+                                    tagged_ops_count += 1
+                                elif in_art:
+                                    art_ops_count += 1
+                                else:
                                     # Text operator executed outside of any marked content sequence
                                     unmarked_count += 1
                                     page_content_occs.append(ContentOccurrenceModel(
@@ -391,7 +426,11 @@ class DocumentParser:
                                 paint_op = m.group("paint")
                                 in_tagged = any(s["mcid"] is not None for s in stack)
                                 in_art = any(s["is_artifact"] for s in stack)
-                                if not in_tagged and not in_art:
+                                if in_tagged and not in_art:
+                                    tagged_ops_count += 1
+                                elif in_art:
+                                    art_ops_count += 1
+                                else:
                                     # Path painting outside marked content
                                     unmarked_count += 1
                                     page_content_occs.append(ContentOccurrenceModel(
@@ -406,6 +445,10 @@ class DocumentParser:
                                 xname = do_m.group(1) if do_m else ""
                                 in_tagged = any(s["mcid"] is not None for s in stack)
                                 in_art = any(s["is_artifact"] for s in stack)
+                                if in_tagged and not in_art:
+                                    tagged_ops_count += 1
+                                elif in_art:
+                                    art_ops_count += 1
 
                                 if any(s["tag"].lower() == "artifact" for s in stack):
                                     art_xobjs.add(xname)
@@ -435,7 +478,7 @@ class DocumentParser:
 
                                     xo_arts_cnt, xo_snippets = xobject_artifact_cache[xref]
                                     if xo_arts_cnt > 0:
-                                        snippet_text = xo_snippets[0] if xo_snippets else f"Artifact in Form XObject /{xname}"
+                                        snippet_text = xo_snippets[0] if xo_snippets else ""
                                         bbox_tuple = (float(xo_rect[0]), float(xo_rect[1]), float(xo_rect[2]), float(xo_rect[3])) if xo_rect else None
 
                                         if in_tagged:
@@ -494,14 +537,14 @@ class DocumentParser:
                 img_list = fitz_page.get_images()
                 links_list = fitz_page.get_links()
 
-                # Map text blocks to bounding boxes as approximation for MCIDs if present
+                # Decode true MCID texts from page content stream using font ToUnicode CMaps
                 if mcids_found:
+                    mcid_texts = self._decode_page_mcid_texts(pike_page, font_cmap_cache)
                     blocks = fitz_page.get_text("blocks")
                     for idx, b in enumerate(blocks):
                         if idx < len(mcids_found):
                             target_mcid = mcids_found[idx]
                             mcid_bboxes[target_mcid] = (b[0], b[1], b[2], b[3])
-                            mcid_texts[target_mcid] = b[4].strip()
 
                 page_mcid_data[page_idx] = {
                     mcid: (mcid_texts.get(mcid, ""), mcid_bboxes.get(mcid, (0, 0, 0, 0)))
@@ -526,6 +569,8 @@ class DocumentParser:
                     artifacts=page_artifacts,
                     content_occurrences=page_content_occs,
                     unmarked_real_content_count=unmarked_count,
+                    tagged_operations_count=tagged_ops_count,
+                    artifact_operations_count=art_ops_count,
                     tagged_in_artifact_count=tagged_in_art_count,
                     artifact_in_tagged_count=art_in_tagged_count,
                     annotations_count=annots_count
@@ -534,6 +579,28 @@ class DocumentParser:
             # 3. Structure Tree
             tree_parser = StructureTreeParser(pike_doc, role_map, page_map, page_mcid_data)
             structure_tree = tree_parser.parse()
+
+            # Reconcile structure tree MCIDs into pages and reconcile tagged_in_artifact_count
+            tree_mcids_by_page: Dict[int, Set[int]] = {}
+            if structure_tree:
+                for node in structure_tree.find_all_nodes():
+                    if node.page:
+                        if node.page not in tree_mcids_by_page:
+                            tree_mcids_by_page[node.page] = set()
+                        tree_mcids_by_page[node.page].update(node.mcids)
+
+            for p in pages:
+                page_tree_mcids = tree_mcids_by_page.get(p.page_number, set())
+                for t_mcid in page_tree_mcids:
+                    if t_mcid not in p.mcids:
+                        p.mcids.append(t_mcid)
+                # Reconcile tagged_in_artifact_count:
+                # In PDF/UA (ISO 14289-1 7.1 / Matterhorn 01-004), content is only tagged if referenced in the structure tree.
+                real_tagged_in_art = [
+                    occ for occ in p.content_occurrences
+                    if occ.is_inside_artifact and occ.mcid is not None and occ.mcid in page_tree_mcids
+                ]
+                p.tagged_in_artifact_count = len(real_tagged_in_art)
 
             # 4. Extract Fonts
             fonts = self._extract_fonts(fitz_doc, pike_doc)
@@ -564,6 +631,91 @@ class DocumentParser:
                 embedded_files_count = fitz_doc.embfile_count()
             except Exception:
                 embedded_files_count = 0
+
+            # 13. Extract and validate unique Form XObjects in document resources (ISO 32000-1 Clause 8.10)
+            form_xobjects: List[FormXObjectModel] = []
+            seen_form_xrefs = set()
+            try:
+                def process_form_xobject(xobj):
+                    og = getattr(xobj, "objgen", None)
+                    if not og or og in seen_form_xrefs:
+                        return
+                    seen_form_xrefs.add(og)
+
+                    if isinstance(xobj, pikepdf.Stream) and xobj.get("/Subtype") == "/Form":
+                        bbox_obj = xobj.get("/BBox")
+                        has_valid_bbox = False
+                        parsed_bbox = None
+                        if isinstance(bbox_obj, pikepdf.Array) and len(bbox_obj) == 4:
+                            try:
+                                coords = [float(c) for c in bbox_obj]
+                                parsed_bbox = (coords[0], coords[1], coords[2], coords[3])
+                                has_valid_bbox = True
+                            except (ValueError, TypeError):
+                                has_valid_bbox = False
+
+                        matrix_valid = True
+                        has_matrix = "/Matrix" in xobj
+                        if has_matrix:
+                            m_obj = xobj.get("/Matrix")
+                            if not isinstance(m_obj, pikepdf.Array) or len(m_obj) != 6:
+                                matrix_valid = False
+                            else:
+                                try:
+                                    _ = [float(c) for c in m_obj]
+                                except (ValueError, TypeError):
+                                    matrix_valid = False
+
+                        sp_val = int(xobj["/StructParents"]) if "/StructParents" in xobj else None
+                        is_valid = has_valid_bbox and matrix_valid
+                        err_msg = ""
+                        if not has_valid_bbox:
+                            err_msg = "Form XObject dictionary lacks valid /BBox 4-element array."
+                        elif not matrix_valid:
+                            err_msg = "Form XObject dictionary contains malformed /Matrix 6-element array."
+
+                        form_xobjects.append(FormXObjectModel(
+                            id=f"Form_XObject_{og[0]}_{og[1]}",
+                            obj_num=og[0],
+                            has_valid_bbox=has_valid_bbox,
+                            bbox=parsed_bbox,
+                            has_matrix=has_matrix,
+                            matrix_valid=matrix_valid,
+                            struct_parents=sp_val,
+                            is_valid=is_valid,
+                            error_message=err_msg
+                        ))
+
+                        if "/Resources" in xobj and "/XObject" in xobj.Resources:
+                            try:
+                                for _, child_xo in xobj.Resources.XObject.items():
+                                    process_form_xobject(child_xo)
+                            except Exception:
+                                pass
+
+                for p in pike_doc.pages:
+                    if "/Resources" in p and "/XObject" in p.Resources:
+                        try:
+                            for _, xo in p.Resources.XObject.items():
+                                process_form_xobject(xo)
+                        except Exception:
+                            pass
+                    if "/Annots" in p:
+                        try:
+                            for a in p.Annots:
+                                if "/AP" in a:
+                                    for ap_key in ["/N", "/R", "/D"]:
+                                        if ap_key in a.AP:
+                                            ap_val = a.AP[ap_key]
+                                            if isinstance(ap_val, pikepdf.Dictionary) and not isinstance(ap_val, pikepdf.Stream):
+                                                for _, sub_v in ap_val.items():
+                                                    process_form_xobject(sub_v)
+                                            else:
+                                                process_form_xobject(ap_val)
+                        except Exception:
+                            pass
+            except Exception as e:
+                logger.debug(f"Error extracting Form XObjects: {e}")
 
             return PDFDocumentModel(
                 filepath=self.filepath,
@@ -610,11 +762,122 @@ class DocumentParser:
                 annotations=annotations,
                 bookmarks=bookmarks,
                 raw_metadata=doc_info,
-                embedded_files_count=embedded_files_count
+                embedded_files_count=embedded_files_count,
+                form_xobjects=form_xobjects
             )
         finally:
             fitz_doc.close()
             pike_doc.close()
+
+    @staticmethod
+    def _parse_tounicode_cmap(stream_bytes: bytes) -> Dict[int, str]:
+        cmap: Dict[int, str] = {}
+        text = stream_bytes.decode("latin1", errors="ignore")
+        for section in re.findall(r'beginbfchar(.*?)endbfchar', text, re.DOTALL):
+            for m in re.finditer(r'<([0-9a-fA-F]+)>\s+<([0-9a-fA-F]+)>', section):
+                src = int(m.group(1), 16)
+                dst_hex = m.group(2)
+                try:
+                    dst_chars = bytes.fromhex(dst_hex).decode("utf-16-be", errors="ignore")
+                    cmap[src] = dst_chars
+                except Exception:
+                    pass
+        for section in re.findall(r'beginbfrange(.*?)endbfrange', text, re.DOTALL):
+            for m in re.finditer(r'<([0-9a-fA-F]+)>\s+<([0-9a-fA-F]+)>\s+<([0-9a-fA-F]+)>', section):
+                start = int(m.group(1), 16)
+                end = int(m.group(2), 16)
+                base = int(m.group(3), 16)
+                if 0 <= (end - start) <= 512:
+                    for offset in range(end - start + 1):
+                        curr_src = start + offset
+                        curr_dst = base + offset
+                        try:
+                            dst_bytes = curr_dst.to_bytes((curr_dst.bit_length() + 7) // 8 or 2, 'big')
+                            if len(dst_bytes) % 2 != 0:
+                                dst_bytes = b'\x00' + dst_bytes
+                            cmap[curr_src] = dst_bytes.decode("utf-16-be", errors="ignore")
+                        except Exception:
+                            pass
+        return cmap
+
+    @classmethod
+    def _decode_page_mcid_texts(
+        cls,
+        pike_page: pikepdf.Page,
+        font_cmap_cache: Dict[Any, Dict[int, str]]
+    ) -> Dict[int, str]:
+        page_cmaps: Dict[str, Dict[int, str]] = {}
+        font_is_2byte: Dict[str, bool] = {}
+        try:
+            if "/Resources" in pike_page and "/Font" in pike_page.Resources:
+                for f_name, f_obj in pike_page.Resources.Font.items():
+                    fn_str = str(f_name).strip("/")
+                    obj_id = getattr(f_obj, "objgen", None)
+                    if obj_id and obj_id in font_cmap_cache:
+                        page_cmaps[fn_str] = font_cmap_cache[obj_id]
+                    elif "/ToUnicode" in f_obj:
+                        try:
+                            cmap = cls._parse_tounicode_cmap(f_obj.ToUnicode.read_bytes())
+                            if obj_id:
+                                font_cmap_cache[obj_id] = cmap
+                            page_cmaps[fn_str] = cmap
+                        except Exception:
+                            pass
+
+                    subtype = str(f_obj.get("/Subtype", "")).strip("/")
+                    font_is_2byte[fn_str] = (subtype == "Type0")
+
+            ops = pikepdf.parse_content_stream(pike_page)
+            stack: List[Optional[int]] = []
+            current_font = None
+            mcid_chars: Dict[int, List[str]] = {}
+
+            for operands, operator in ops:
+                op = str(operator)
+                if op == "Tf" and operands:
+                    current_font = str(operands[0]).strip("/")
+                elif op == "BDC":
+                    props = operands[1] if len(operands) > 1 else None
+                    mcid = None
+                    if isinstance(props, pikepdf.Dictionary) and "/MCID" in props:
+                        mcid = int(props["/MCID"])
+                    stack.append(mcid)
+                elif op == "BMC":
+                    stack.append(None)
+                elif op == "EMC":
+                    if stack:
+                        stack.pop()
+                elif op in ("Tj", "'", "\"", "TJ"):
+                    curr_mcid = next((m for m in reversed(stack) if m is not None), None)
+                    if curr_mcid is not None:
+                        if curr_mcid not in mcid_chars:
+                            mcid_chars[curr_mcid] = []
+                        cmap = page_cmaps.get(current_font, {})
+                        is_2b = font_is_2byte.get(current_font, False)
+                        raw_items: List[bytes] = []
+                        if op in ("Tj", "'", "\"") and operands and isinstance(operands[0], (pikepdf.String, bytes)):
+                            raw_items.append(bytes(operands[0]))
+                        elif op == "TJ" and operands and isinstance(operands[0], pikepdf.Array):
+                            for item in operands[0]:
+                                if isinstance(item, (pikepdf.String, bytes)):
+                                    raw_items.append(bytes(item))
+
+                        for b in raw_items:
+                            if cmap:
+                                if is_2b or (len(b) % 2 == 0 and any(k > 255 for k in cmap.keys())):
+                                    for i in range(0, len(b) - 1, 2):
+                                        code = int.from_bytes(b[i:i+2], 'big')
+                                        mcid_chars[curr_mcid].append(cmap.get(code, chr(code) if code < 256 else ""))
+                                else:
+                                    for byte_val in b:
+                                        mcid_chars[curr_mcid].append(cmap.get(byte_val, chr(byte_val)))
+                            else:
+                                mcid_chars[curr_mcid].append(b.decode("latin1", errors="ignore"))
+
+            return {mc: "".join(chars) for mc, chars in mcid_chars.items()}
+        except Exception as e:
+            logger.debug(f"Error decoding page MCID texts: {e}")
+            return {}
 
     def _extract_fonts(self, fitz_doc: pymupdf.Document, pike_doc: pikepdf.Pdf) -> List[FontModel]:
         """Extracts all fonts and verifies embedding and ToUnicode maps."""
@@ -643,7 +906,7 @@ class DocumentParser:
                 has_tounicode = False
                 has_standard_encoding = str(encoding).strip("/") in (
                     "WinAnsiEncoding", "MacRomanEncoding", "StandardEncoding",
-                    "PDFDocEncoding", "Identity-H", "Identity-V"
+                    "PDFDocEncoding"
                 )
 
                 font_obj = None
@@ -758,8 +1021,12 @@ class DocumentParser:
 
             # Using page.get_images() is ~40x faster than get_image_info() on large files
             page_imgs = page.get_images()
+            page_xref_counts: Dict[int, int] = {}
             for img in page_imgs:
                 xref = img[0]
+                occ_num = page_xref_counts.get(xref, 0) + 1
+                page_xref_counts[xref] = occ_num
+
                 width = img[2] if len(img) > 2 else 0
                 height = img[3] if len(img) > 3 else 0
                 cs = img[5] if len(img) > 5 else "RGB"
@@ -783,12 +1050,15 @@ class DocumentParser:
                     try:
                         rects = page.get_image_rects(xref)
                         if rects:
-                            bbox_tuple = (rects[0].x0, rects[0].y0, rects[0].x1, rects[0].y1)
+                            r_idx = occ_num - 1
+                            r = rects[r_idx] if r_idx < len(rects) else rects[0]
+                            bbox_tuple = (r.x0, r.y0, r.x1, r.y1)
                     except Exception:
                         pass
 
+                img_id = f"img_p{page_num}_{xref}" if occ_num == 1 else f"img_p{page_num}_{xref}_{occ_num}"
                 images.append(ImageModel(
-                    id=f"img_p{page_num}_{xref}",
+                    id=img_id,
                     page=page_num,
                     bbox=bbox_tuple,
                     width=width,
@@ -817,7 +1087,21 @@ class DocumentParser:
             rows_count = len(tr_nodes)
             th_count = len(th_nodes)
             td_count = len(td_nodes)
-            cols_count = max((len(tr.find_all_by_standard_tag("TH")) + len(tr.find_all_by_standard_tag("TD"))) for tr in tr_nodes) if tr_nodes else 0
+            row_cols = []
+            for tr in tr_nodes:
+                cells = [c for c in tr.children if c.standard_tag.upper() in ("TH", "TD")]
+                total_row_span = 0
+                for cell in cells:
+                    colspan_val = cell.attributes.get("ColSpan", 1)
+                    try:
+                        span = int(colspan_val)
+                    except Exception:
+                        span = 1
+                    total_row_span += max(1, span)
+                row_cols.append(total_row_span)
+
+            cols_count = max(row_cols) if row_cols else 0
+            is_regular = (len(set(row_cols)) <= 1) if row_cols else True
 
             page_val = t_node.page
             if page_val is None and t_node.pages_spanned:
@@ -834,7 +1118,7 @@ class DocumentParser:
                 header_cells_count=th_count,
                 data_cells_count=td_count,
                 summary=t_node.title,
-                is_regular=(th_count + td_count) == (rows_count * cols_count) if (rows_count > 0 and cols_count > 0) else True,
+                is_regular=is_regular,
                 bbox=t_node.bbox
             ))
 

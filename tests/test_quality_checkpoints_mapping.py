@@ -20,17 +20,16 @@ def qapp():
 
 
 def test_quality_category_rule_mappings_coverage():
-    """Verify all 16 defined Quality checkpoints map to registered engine rule IDs."""
+    """Verify all 15 defined Quality checkpoints map to registered engine rule IDs matching PAC."""
     expected_categories = [
         "Validity of document title",
         "Artifacted content on page body",
         "Tagged text consists of only whitespace",
-        "Tagged content exists outside the page boundaries",
+        "Tagged content exists outside of the page boundaries",
         "Presence of headings",
-        "Presence of bookmarks",
+        "Presence of bookmarks (document outline) if there are headings",
         '"TOCI" elements contain "Link" elements',
         '"TOCI" elements correctly linked to headings',
-        "Validity of alternative texts",
         "Alternative text on text elements",
         'Completeness of "Link" elements',
         'Formal correctness of "LI" elements',
@@ -40,7 +39,7 @@ def test_quality_category_rule_mappings_coverage():
         '"P" elements contain "Note" elements',
     ]
     assert CheckpointsView.QUALITY_CATEGORIES == expected_categories
-    assert len(CheckpointsView.QUALITY_CATEGORIES) == 16
+    assert len(CheckpointsView.QUALITY_CATEGORIES) == 15
 
     for cat in expected_categories:
         assert cat in CheckpointsView.QUALITY_RULE_MAPPINGS

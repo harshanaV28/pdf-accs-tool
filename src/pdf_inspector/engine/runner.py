@@ -76,6 +76,7 @@ class AuditRunner:
             "is_encrypted": doc.is_encrypted,
             "display_doc_title": doc.display_doc_title,
             "pdfua_declared": doc.pdfua_identifier_present,
+            "tags_count": len([n for n in doc.structure_tree.find_all_nodes() if n.tag != "StructTreeRoot"]) if doc.structure_tree else 0,
             "fonts_count": len(doc.fonts),
             "images_count": len(doc.images),
             "tables_count": len(doc.tables),

@@ -59,12 +59,6 @@ class ArtifactInsideTaggedContentRule(BaseRule):
         results = []
         artifacts = doc.all_artifacts
         if not artifacts:
-            results.append(self.create_result(
-                status=CheckStatus.PASS,
-                message="No content marked as Artifact is present inside tagged content.",
-                evidence="Artifacts inside tagged content count: 0",
-                items_count=1
-            ))
             return results
 
         invalid_artifacts = [a for a in artifacts if a.is_inside_tagged]

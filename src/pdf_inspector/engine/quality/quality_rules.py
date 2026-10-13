@@ -4,7 +4,8 @@ Audits structural quality, heading hierarchy leaps, container placement heuristi
 table layout regularity, and authoring best practices.
 """
 
-from typing import List, Dict, Any, Set, Optional
+from typing import List, Dict, Any, Set, Optional, Tuple
+import os
 import re
 from ..rule_base import BaseRule
 from ...core.models import PDFDocumentModel, CheckResult, CheckStatus, Severity, StructureNode
@@ -47,9 +48,11 @@ class HeadingHierarchyQualityRule(BaseRule):
             ))
             return results
 
+        has_warnings = False
         # Check first heading
         first_level, first_tag, first_pg, first_id = heading_list[0]
         if first_level != 1:
+            has_warnings = True
             results.append(self.create_result(
                 status=CheckStatus.WARNING,
                 message=f"The first heading in the document is <{first_tag}> (level {first_level}) instead of <H1>.",
@@ -57,7 +60,8 @@ class HeadingHierarchyQualityRule(BaseRule):
                 page=first_pg,
                 object_reference=f"<{first_tag} id='{first_id}'>",
                 custom_remediation="Start the document heading hierarchy with an <H1> main title.",
-                confidence=0.85
+                confidence=0.85,
+                items_count=1
             ))
 
         # Check for skipped levels
@@ -69,6 +73,7 @@ class HeadingHierarchyQualityRule(BaseRule):
             prev_level = lvl
 
         if skipped_jumps:
+            has_warnings = True
             for p_lvl, c_lvl, tag, pg, nid in skipped_jumps[:5]:
                 results.append(self.create_result(
                     status=CheckStatus.WARNING,
@@ -78,13 +83,27 @@ class HeadingHierarchyQualityRule(BaseRule):
                     object_reference=f"<{tag} id='{nid}'>",
                     custom_severity=Severity.MEDIUM,
                     custom_remediation=f"Demote <{tag}> to <H{p_lvl + 1}> or insert an intervening <H{p_lvl + 1}> section.",
-                    confidence=0.85
+                    confidence=0.85,
+                    items_count=1
                 ))
-        else:
+            if len(skipped_jumps) > 5:
+                rem = len(skipped_jumps) - 5
+                results.append(self.create_result(
+                    status=CheckStatus.WARNING,
+                    message=f"{rem} additional heading level jumps skipped in hierarchy.",
+                    evidence=f"Total skipped jumps: {len(skipped_jumps)}",
+                    custom_severity=Severity.MEDIUM,
+                    custom_remediation="Demote skipped headings or insert intervening levels.",
+                    confidence=0.85,
+                    items_count=rem
+                ))
+
+        if not has_warnings:
             results.append(self.create_result(
                 status=CheckStatus.PASS,
                 message=f"Heading hierarchy is logically consistent across all {len(heading_list)} heading(s).",
-                evidence=f"Headings validated: {len(heading_list)}"
+                evidence=f"Headings validated: {len(heading_list)}",
+                items_count=1
             ))
 
         return results
@@ -147,15 +166,11 @@ class TableRegularityQualityRule(BaseRule):
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
         results = []
         if not doc.tables:
-            return [self.create_result(
-                status=CheckStatus.PASS,
-                message="No data tables found in document.",
-                evidence="Tables count: 0"
-            )]
+            return results
 
         irregular_tables = [t for t in doc.tables if not t.is_regular]
         if irregular_tables:
-            for t in irregular_tables:
+            for t in irregular_tables[:5]:
                 results.append(self.create_result(
                     status=CheckStatus.WARNING,
                     message=f"Table on page {t.page} has irregular grid dimensions (possible unannounced spanned cells).",
@@ -163,13 +178,33 @@ class TableRegularityQualityRule(BaseRule):
                     page=t.page,
                     object_reference=f"Table {t.id}",
                     custom_remediation="Verify column/row span attributes (ColSpan/RowSpan) on irregular table cells.",
-                    confidence=0.8
+                    confidence=0.8,
+                    items_count=1
+                ))
+            if len(irregular_tables) > 5:
+                rem = len(irregular_tables) - 5
+                results.append(self.create_result(
+                    status=CheckStatus.WARNING,
+                    message=f"{rem} additional table(s) have irregular grid dimensions.",
+                    evidence=f"Total irregular tables: {len(irregular_tables)}",
+                    custom_severity=Severity.MEDIUM,
+                    custom_remediation="Verify column/row span attributes (ColSpan/RowSpan) on irregular table cells.",
+                    items_count=rem
+                ))
+            regular_tables = [t for t in doc.tables if t.is_regular]
+            if regular_tables:
+                results.append(self.create_result(
+                    status=CheckStatus.PASS,
+                    message=f"{len(regular_tables)} of {len(doc.tables)} table(s) have regular matrix structures.",
+                    evidence=f"Table symmetry validated for {len(regular_tables)} table(s).",
+                    items_count=len(regular_tables)
                 ))
         else:
             results.append(self.create_result(
                 status=CheckStatus.PASS,
                 message=f"All {len(doc.tables)} table(s) have regular matrix structures.",
-                evidence="Table symmetry validated."
+                evidence="Table symmetry validated.",
+                items_count=len(doc.tables)
             ))
 
         return results
@@ -284,13 +319,15 @@ class TaggedContentPageBoundariesRule(BaseRule):
                     message=f"{rem} additional tagged content elements lie outside page boundaries.",
                     evidence=f"Total out-of-bounds elements: {len(out_of_bounds)}",
                     custom_severity=Severity.HIGH,
-                    custom_remediation="Inspect and relocate out-of-bounds elements into visible page coordinates."
+                    custom_remediation="Inspect and relocate out-of-bounds elements into visible page coordinates.",
+                    items_count=rem
                 ))
         else:
             results.append(self.create_result(
                 status=CheckStatus.PASS,
                 message="All tagged content sequences are situated within visible page boundaries.",
-                evidence=f"Page boundary checks verified across {len(doc.pages)} page(s)."
+                evidence=f"Page boundary checks verified across {len(doc.pages)} page(s).",
+                items_count=0
             ))
 
         return results
@@ -354,7 +391,8 @@ class TOCIContainsLinkRule(BaseRule):
                     message=f"{rem} additional <TOCI> elements lack <Link> elements.",
                     evidence=f"Total invalid TOCI elements: {len(invalid_toci)}",
                     custom_severity=Severity.HIGH,
-                    custom_remediation="Ensure all TOCI elements contain nested Link tags."
+                    custom_remediation="Ensure all TOCI elements contain nested Link tags.",
+                    items_count=rem
                 ))
 
         if valid_count > 0:
@@ -425,7 +463,18 @@ class TOCILinkDestinationRule(BaseRule):
                     page=toci.page or 1,
                     object_reference=f"<{lnk.tag} id='{lnk.id}'>",
                     custom_severity=Severity.MEDIUM,
-                    custom_remediation="Assign a valid internal page or heading destination to the TOCI link."
+                    custom_remediation="Assign a valid internal page or heading destination to the TOCI link.",
+                    items_count=1
+                ))
+            if len(invalid_links) > 5:
+                rem = len(invalid_links) - 5
+                results.append(self.create_result(
+                    status=CheckStatus.WARNING,
+                    message=f"{rem} additional <TOCI> link(s) lack resolvable destinations.",
+                    evidence=f"Total unresolved TOCI links: {len(invalid_links)}",
+                    custom_severity=Severity.MEDIUM,
+                    custom_remediation="Assign valid destinations to all TOCI links.",
+                    items_count=rem
                 ))
         if valid_count > 0:
             results.append(self.create_result(
@@ -490,13 +539,15 @@ class TextElementAltTextQualityRule(BaseRule):
                     message=f"{rem} additional text element(s) carry masking /Alt attributes.",
                     evidence=f"Total text elements with /Alt: {len(inappropriate_alt)}",
                     custom_severity=Severity.MEDIUM,
-                    custom_remediation="Review and clean /Alt attributes from text structure tags."
+                    custom_remediation="Review and clean /Alt attributes from text structure tags.",
+                    items_count=rem
                 ))
         else:
             results.append(self.create_result(
                 status=CheckStatus.PASS,
                 message="Text structure elements avoid inappropriate /Alt attributes.",
-                evidence=f"Verified {len(text_nodes)} text structure elements."
+                evidence=f"Verified {len(text_nodes)} text structure elements.",
+                items_count=0
             ))
 
         return results
@@ -569,7 +620,8 @@ class NoteReferencedQualityRule(BaseRule):
                     message=f"{rem} additional <Note> elements lack corresponding <Reference> elements.",
                     evidence=f"Total unreferenced notes: {len(unreferenced)}",
                     custom_severity=Severity.HIGH,
-                    custom_remediation="Ensure all footnotes/notes are referenced."
+                    custom_remediation="Ensure all footnotes/notes are referenced.",
+                    items_count=rem
                 ))
 
         if valid_count > 0:
@@ -639,7 +691,8 @@ class NoteContainsLabelQualityRule(BaseRule):
                     message=f"{rem} additional <Note> elements lack <Lbl> elements.",
                     evidence=f"Total notes missing Lbl: {len(missing_lbl)}",
                     custom_severity=Severity.MEDIUM,
-                    custom_remediation="Ensure Note elements contain Lbl tags."
+                    custom_remediation="Ensure Note elements contain Lbl tags.",
+                    items_count=rem
                 ))
 
         if valid_count > 0:
@@ -698,7 +751,18 @@ class ParagraphContainsNoteQualityRule(BaseRule):
                     page=note.page or 1,
                     object_reference=f"<{note.tag} id='{note.id}'>",
                     custom_severity=Severity.LOW,
-                    custom_remediation="Nest the <Note> element within a <P> or <Sect> tag."
+                    custom_remediation="Nest the <Note> element within a <P> or <Sect> tag.",
+                    items_count=1
+                ))
+            if len(orphan_notes) > 5:
+                rem = len(orphan_notes) - 5
+                results.append(self.create_result(
+                    status=CheckStatus.WARNING,
+                    message=f"{rem} additional unparented <Note> element(s) located outside paragraph context.",
+                    evidence=f"Total unparented notes: {len(orphan_notes)}",
+                    custom_severity=Severity.LOW,
+                    custom_remediation="Nest the <Note> element within a <P> or <Sect> tag.",
+                    items_count=rem
                 ))
         if valid_count > 0:
             results.append(self.create_result(
@@ -706,6 +770,367 @@ class ParagraphContainsNoteQualityRule(BaseRule):
                 message=f"{valid_count} <Note> element(s) are properly nested inside block containers.",
                 evidence=f"Note nesting verified ({valid_count}/{len(note_nodes)}).",
                 items_count=valid_count
+            ))
+
+        return results
+
+
+class ArtifactedContentOnPageBodyRule(BaseRule):
+    """
+    Validates that real content (text, graphics) in the page body is not inappropriately marked as an artifact.
+    Matterhorn Protocol Checkpoint 01-003.
+    """
+    rule_id = "QUAL-ART-001"
+    name = "Artifacted Content on Page Body"
+    category = "Content Quality"
+    standard = "Quality"
+    severity = Severity.HIGH
+    machine_testable = True
+    description = "Content present in the page body must not be marked as an artifact unless strictly decorative."
+    remediation_template = "Verify that body text and graphics are not marked as artifacts."
+
+    def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
+        results = []
+        if not doc.all_artifacts:
+            return results
+
+        body_artifacts = []
+        for art in doc.all_artifacts:
+            txt = (art.text_snippet or "").strip()
+            if txt and not txt.startswith("Artifact in Form XObject"):
+                is_pagination = bool(re.match(r'^(page\s*\d+(\s+of\s+\d+)?|\d+(\s+of\s+\d+)?|chapter\s*\d+|section\s*\d+)$', txt, re.IGNORECASE))
+                if not is_pagination and len(txt) > 3:
+                    body_artifacts.append(art)
+
+        if body_artifacts:
+            for art in body_artifacts[:5]:
+                results.append(self.create_result(
+                    status=CheckStatus.WARNING,
+                    message=f"Artifact on page {art.page_number} contains readable text: \"{art.text_snippet[:40]}\".",
+                    evidence=f"Artifact with text on page {art.page_number}",
+                    page=art.page_number,
+                    bounding_box=art.bbox,
+                    custom_severity=Severity.HIGH,
+                    custom_remediation="Remove artifact marking from meaningful text content in Acrobat Pro.",
+                    items_count=1
+                ))
+            if len(body_artifacts) > 5:
+                rem = len(body_artifacts) - 5
+                results.append(self.create_result(
+                    status=CheckStatus.WARNING,
+                    message=f"{rem} additional artifact(s) on page body contain readable text.",
+                    evidence=f"Total body artifacts: {len(body_artifacts)}",
+                    custom_severity=Severity.HIGH,
+                    custom_remediation="Remove artifact marking from meaningful text content in Acrobat Pro.",
+                    items_count=rem
+                ))
+        else:
+            results.append(self.create_result(
+                status=CheckStatus.PASS,
+                message="No body text or meaningful content is marked as an artifact.",
+                evidence="Artifact body placement validated.",
+                items_count=0
+            ))
+
+        return results
+
+
+class LinkCompletenessQualityRule(BaseRule):
+    """
+    Validates that Link structure elements in the document are complete (contain Link annotations and text).
+    Matterhorn Protocol Checkpoint 14-001.
+    """
+    rule_id = "QUAL-LINK-002"
+    name = "Completeness of Link Elements"
+    category = "Link Quality"
+    standard = "Quality"
+    severity = Severity.HIGH
+    machine_testable = True
+    description = "Every Link structure element must contain an associated link annotation and link text."
+    remediation_template = "Ensure each Link tag encloses its corresponding link annotation in Acrobat Pro."
+
+    def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
+        results = []
+        if not doc.structure_tree:
+            return results
+
+        all_nodes = doc.structure_tree.find_all_nodes()
+        link_nodes = [n for n in all_nodes if (n.standard_tag or "").upper() == "LINK"]
+        if not link_nodes:
+            return results
+
+        incomplete_links = []
+        for ln in link_nodes:
+            if not ln.children and not ln.mcids and not (ln.text_content and ln.text_content.strip()):
+                incomplete_links.append(ln)
+
+        if incomplete_links:
+            for ln in incomplete_links[:5]:
+                results.append(self.create_result(
+                    status=CheckStatus.FAIL,
+                    message=f"<Link> element on page {ln.page or 1} is incomplete (no child content or annotation).",
+                    evidence=f"Incomplete Link <{ln.tag} id='{ln.id}'>",
+                    page=ln.page or 1,
+                    object_reference=f"<{ln.tag} id='{ln.id}'>",
+                    custom_severity=Severity.HIGH,
+                    custom_remediation="Associate a link annotation and visible text with this Link tag.",
+                    items_count=1
+                ))
+            if len(incomplete_links) > 5:
+                rem = len(incomplete_links) - 5
+                results.append(self.create_result(
+                    status=CheckStatus.FAIL,
+                    message=f"{rem} additional incomplete <Link> element(s).",
+                    evidence=f"Total incomplete links: {len(incomplete_links)}",
+                    custom_severity=Severity.HIGH,
+                    custom_remediation="Associate link annotations and visible text with all Link tags.",
+                    items_count=rem
+                ))
+        else:
+            results.append(self.create_result(
+                status=CheckStatus.PASS,
+                message="All Link elements are structurally complete.",
+                evidence=f"Validated {len(link_nodes)} link element(s).",
+                items_count=0
+            ))
+
+        return results
+
+
+class TaggedTextOnlyWhitespaceQualityRule(BaseRule):
+    """
+    Validates that tagged text structure elements do not consist solely of whitespace.
+    Matterhorn Protocol Checkpoint 13-005 / ISO 14289-1 §7.1 / PAC Quality Checkpoint.
+    """
+    rule_id = "QUAL-WHITE-001"
+    name = "Tagged text consists of only whitespace"
+    category = "Content Quality"
+    standard = "Quality"
+    severity = Severity.HIGH
+    machine_testable = True
+    description = "Tagged text structure elements must not consist solely of whitespace characters (spaces, tabs, newlines)."
+    remediation_template = "Delete empty tags or tag the content as an artifact if it is decorative spacing."
+
+    TEXT_TAGS = {"P", "SPAN", "H1", "H2", "H3", "H4", "H5", "H6", "CAPTION", "QUOTE", "BLOCKQUOTE", "LBODY", "TH", "TD", "BIBENTRY", "CODE"}
+
+    @staticmethod
+    def _parse_tounicode_cmap(stream_bytes: bytes) -> Dict[int, str]:
+        cmap: Dict[int, str] = {}
+        text = stream_bytes.decode("latin1", errors="ignore")
+        for section in re.findall(r'beginbfchar(.*?)endbfchar', text, re.DOTALL):
+            for m in re.finditer(r'<([0-9a-fA-F]+)>\s+<([0-9a-fA-F]+)>', section):
+                src = int(m.group(1), 16)
+                dst_hex = m.group(2)
+                try:
+                    dst_chars = bytes.fromhex(dst_hex).decode("utf-16-be", errors="ignore")
+                    cmap[src] = dst_chars
+                except Exception:
+                    pass
+        for section in re.findall(r'beginbfrange(.*?)endbfrange', text, re.DOTALL):
+            for m in re.finditer(r'<([0-9a-fA-F]+)>\s+<([0-9a-fA-F]+)>\s+<([0-9a-fA-F]+)>', section):
+                start = int(m.group(1), 16)
+                end = int(m.group(2), 16)
+                base = int(m.group(3), 16)
+                if 0 <= (end - start) <= 512:
+                    for offset in range(end - start + 1):
+                        curr_src = start + offset
+                        curr_dst = base + offset
+                        try:
+                            dst_bytes = curr_dst.to_bytes((curr_dst.bit_length() + 7) // 8 or 2, 'big')
+                            if len(dst_bytes) % 2 != 0:
+                                dst_bytes = b'\x00' + dst_bytes
+                            cmap[curr_src] = dst_bytes.decode("utf-16-be", errors="ignore")
+                        except Exception:
+                            pass
+        return cmap
+
+    def _decode_page_mcid_texts(self, filepath: str, page_num: int) -> Dict[int, str]:
+        try:
+            import pikepdf
+            if not os.path.exists(filepath):
+                return {}
+            with pikepdf.open(filepath) as pdf:
+                if page_num < 1 or page_num > len(pdf.pages):
+                    return {}
+                page_obj = pdf.pages[page_num - 1]
+
+                # Parse font CMaps on page
+                page_cmaps: Dict[str, Dict[int, str]] = {}
+                if "/Resources" in page_obj and "/Font" in page_obj.Resources:
+                    for f_name, f_obj in page_obj.Resources.Font.items():
+                        fn_str = str(f_name).strip("/")
+                        if "/ToUnicode" in f_obj:
+                            try:
+                                page_cmaps[fn_str] = self._parse_tounicode_cmap(f_obj.ToUnicode.read_bytes())
+                            except Exception:
+                                pass
+
+                ops = pikepdf.parse_content_stream(page_obj)
+                stack: List[Tuple[str, Optional[int]]] = []
+                current_font = None
+                mcid_chars: Dict[int, List[str]] = {}
+
+                for operands, operator in ops:
+                    op = str(operator)
+                    if op == "Tf":
+                        if operands and len(operands) >= 1:
+                            current_font = str(operands[0]).strip("/")
+                    elif op == "BDC":
+                        tag = str(operands[0]).strip("/") if operands else "Span"
+                        props = operands[1] if len(operands) > 1 else None
+                        mcid = None
+                        if isinstance(props, pikepdf.Dictionary) and "/MCID" in props:
+                            mcid = int(props["/MCID"])
+                        stack.append((tag, mcid))
+                    elif op == "BMC":
+                        tag = str(operands[0]).strip("/") if operands else "Span"
+                        stack.append((tag, None))
+                    elif op == "EMC":
+                        if stack:
+                            stack.pop()
+                    elif op in ("Tj", "'", "\"", "TJ"):
+                        curr_mcid = next((m for t, m in reversed(stack) if m is not None), None)
+                        if curr_mcid is not None:
+                            if curr_mcid not in mcid_chars:
+                                mcid_chars[curr_mcid] = []
+                            cmap = page_cmaps.get(current_font, {})
+                            raw_items: List[bytes] = []
+                            if op in ("Tj", "'", "\""):
+                                if operands and isinstance(operands[0], (pikepdf.String, bytes)):
+                                    raw_items.append(bytes(operands[0]))
+                            elif op == "TJ":
+                                if operands and isinstance(operands[0], pikepdf.Array):
+                                    for item in operands[0]:
+                                        if isinstance(item, (pikepdf.String, bytes)):
+                                            raw_items.append(bytes(item))
+
+                            for b in raw_items:
+                                if cmap:
+                                    if len(b) % 2 == 0:
+                                        for i in range(0, len(b), 2):
+                                            code = int.from_bytes(b[i:i+2], 'big')
+                                            mcid_chars[curr_mcid].append(cmap.get(code, chr(code) if code < 256 else ""))
+                                    else:
+                                        for byte_val in b:
+                                            mcid_chars[curr_mcid].append(cmap.get(byte_val, chr(byte_val)))
+                                else:
+                                    mcid_chars[curr_mcid].append(b.decode("latin1", errors="ignore"))
+
+                return {mc: "".join(chars) for mc, chars in mcid_chars.items()}
+        except Exception:
+            return {}
+
+    def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
+        results = []
+        if not doc.structure_tree or not doc.is_tagged:
+            return results
+
+        all_nodes = doc.structure_tree.find_all_nodes()
+        page_mcid_cache: Dict[int, Dict[int, str]] = {}
+        flagged_nodes: Set[str] = set()
+        findings: List[StructureNode] = []
+
+        for node in all_nodes:
+            if node.tag == "StructTreeRoot":
+                continue
+            std_tag = (node.standard_tag or node.tag or "").upper()
+            if std_tag not in self.TEXT_TAGS:
+                continue
+
+            # Check if any ancestor is already flagged (prevent duplicate descendant warnings)
+            anc = node.parent
+            anc_flagged = False
+            while anc:
+                if anc.id in flagged_nodes:
+                    anc_flagged = True
+                    break
+                anc = anc.parent
+            if anc_flagged:
+                continue
+
+            # 1. Handle /ActualText
+            if node.actual_text is not None:
+                if len(node.actual_text) > 0 and node.actual_text.strip() == "":
+                    flagged_nodes.add(node.id)
+                    findings.append(node)
+                continue
+
+            # 2. Handle /Alt
+            if node.alt_text is not None:
+                if len(node.alt_text) > 0 and node.alt_text.strip() == "":
+                    flagged_nodes.add(node.id)
+                    findings.append(node)
+                continue
+
+            # 3. Direct text payload on node
+            if node.text_content and len(node.text_content) > 0:
+                if node.text_content.strip() == "":
+                    # Check if inline child inside parent with meaningful text
+                    if node.parent and (node.parent.standard_tag or node.parent.tag or "").upper() in self.TEXT_TAGS:
+                        parent_text = (node.parent.text_content or node.parent.actual_text or node.parent.alt_text or "")
+                        if parent_text.strip():
+                            continue
+                    flagged_nodes.add(node.id)
+                    findings.append(node)
+                continue
+
+            # 4. Check marked content sequences
+            if not node.children and (node.mcids or node.mcid_entries):
+                pg_num = node.page or 1
+                mcids_to_check = [m for m, p in node.mcid_entries if p == pg_num] if node.mcid_entries else node.mcids
+
+                # Check PageModel mcid_texts first
+                pm_texts = {}
+                if doc.pages and 0 < pg_num <= len(doc.pages):
+                    page_mod = doc.pages[pg_num - 1]
+                    if hasattr(page_mod, "mcid_texts") and page_mod.mcid_texts:
+                        pm_texts = page_mod.mcid_texts
+
+                texts_found = []
+                for mc in mcids_to_check:
+                    if mc in pm_texts:
+                        texts_found.append(pm_texts[mc])
+
+                # If no text from page model and file exists, decode from stream
+                if not texts_found and doc.filepath and os.path.exists(doc.filepath):
+                    if pg_num not in page_mcid_cache:
+                        page_mcid_cache[pg_num] = self._decode_page_mcid_texts(doc.filepath, pg_num)
+                    stream_pm = page_mcid_cache.get(pg_num, {})
+                    for mc in mcids_to_check:
+                        if mc in stream_pm:
+                            texts_found.append(stream_pm[mc])
+
+                if texts_found:
+                    combined = "".join(texts_found)
+                    if len(combined) > 0 and combined.strip() == "":
+                        # Check inline child context
+                        if node.parent and (node.parent.standard_tag or node.parent.tag or "").upper() in self.TEXT_TAGS:
+                            parent_text = (node.parent.text_content or node.parent.actual_text or node.parent.alt_text or "")
+                            if parent_text.strip():
+                                continue
+                        flagged_nodes.add(node.id)
+                        findings.append(node)
+
+        if findings:
+            for node in findings:
+                pg = node.page or 1
+                results.append(self.create_result(
+                    status=CheckStatus.WARNING,
+                    message=f"Tagged text inside <{node.tag}> on page {pg} consists of only whitespace.",
+                    evidence=f"<{node.tag}> element on page {pg} contains only whitespace characters.",
+                    page=pg,
+                    bounding_box=node.bbox,
+                    object_reference=f"<{node.tag} id='{node.id}'>",
+                    custom_severity=Severity.HIGH,
+                    custom_remediation="Delete empty tags or tag the content as an artifact if it is decorative spacing.",
+                    items_count=1
+                ))
+        else:
+            results.append(self.create_result(
+                status=CheckStatus.PASS,
+                message="Tagged text elements avoid whitespace-only content.",
+                evidence="All tagged text elements validated.",
+                items_count=0
             ))
 
         return results
