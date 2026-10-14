@@ -368,7 +368,7 @@ class CheckpointsView(QWidget):
         bottom_layout.setSpacing(8)
 
         self.btn_detail = QPushButton("📋 Results in detail")
-        self.btn_detail.clicked.connect(self.request_detailed_results)
+        self.btn_detail.clicked.connect(self._on_btn_detail_clicked)
         bottom_layout.addWidget(self.btn_detail)
 
         self.btn_report = QPushButton("📄 PDF report")
@@ -382,6 +382,19 @@ class CheckpointsView(QWidget):
         bottom_layout.addWidget(self.btn_stats)
 
         main_layout.addWidget(bottom_bar)
+
+    def _on_btn_detail_clicked(self):
+        """Dispatches detailed results request, resolving the currently active checkpoint selection if present."""
+        curr_idx = self.tab_widget.currentIndex()
+        tables = [self.table_pdf_ua, self.table_wcag, self.table_quality, self.table_ai]
+        if 0 <= curr_idx < len(tables):
+            table = tables[curr_idx]
+            row = table.currentRow()
+            if 0 <= row < len(table.categories):
+                cat_name = table.categories[row]
+                self.category_selected.emit(table.standard_name, cat_name)
+                return
+        self.request_detailed_results.emit()
 
     def update_report(self, report: AuditReport, doc: Optional[PDFDocumentModel] = None):
         """Updates all tables, status banners, tab icons, and document metadata summary."""

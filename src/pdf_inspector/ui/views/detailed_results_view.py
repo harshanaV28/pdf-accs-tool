@@ -25,6 +25,8 @@ class DetailedResultsView(QWidget):
         self.all_findings: List[CheckResult] = []
         self.filtered_findings: List[CheckResult] = []
         self.rule_ids_filter: Optional[List[str]] = None
+        self.category_filter: Optional[str] = None
+        self._programmatic_change = False
         self._init_ui()
 
     def _init_ui(self):
@@ -73,7 +75,7 @@ class DetailedResultsView(QWidget):
         # Standard Filter
         self.combo_std = QComboBox()
         self.combo_std.addItems(["All Standards", "PDF/UA", "WCAG", "Quality", "AI"])
-        self.combo_std.currentTextChanged.connect(self._apply_filters)
+        self.combo_std.currentTextChanged.connect(self._on_std_filter_changed)
         filter_bar.addWidget(self.combo_std)
 
         filter_bar.addStretch()
@@ -121,30 +123,91 @@ class DetailedResultsView(QWidget):
         self.lbl_count.setStyleSheet("color: #64748b; font-size: 11px;")
         layout.addWidget(self.lbl_count)
 
+    def _on_std_filter_changed(self, text: str):
+        if not self._programmatic_change:
+            self.category_filter = None
+            self.rule_ids_filter = None
+            self.search_input.clear()
+            self._apply_filters()
+
     def set_findings(self, findings: List[CheckResult]):
         """Sets the complete list of findings and updates table."""
         self.all_findings = findings
+        self.category_filter = None
+        self.rule_ids_filter = None
         self._apply_filters()
+
+    def _matches_category(self, r: CheckResult, category: str) -> bool:
+        """Determines if a CheckResult belongs to a given checkpoint category."""
+        if not category:
+            return True
+        r_cat = (getattr(r, "category", "") or "").strip()
+        cat_target = category.strip()
+
+        # Direct exact match (case-insensitive)
+        if r_cat.lower() == cat_target.lower():
+            return True
+
+        # Check PAC mapped category
+        std_up = (getattr(r, "standard", "") or "").upper()
+        if std_up in ("PDF/UA", "PDFUA"):
+            pdfua_map = {
+                "Tables": "Structure elements",
+                "Forms": "Structure elements",
+                "Artifacts": "Content",
+                "Syntax": "PDF Syntax (ISO 32000-1)",
+                "PDF Syntax": "PDF Syntax (ISO 32000-1)",
+            }
+            mapped = pdfua_map.get(r_cat, r_cat)
+            if r_cat == "Annotations":
+                mapped = "Document settings" if getattr(r, "check_id", "") == "PDFUA-ANNOT-002" else "Content"
+            elif getattr(r, "check_id", "").startswith("PDFUA-UNICODE-"):
+                mapped = "Natural language"
+            if mapped.lower() == cat_target.lower():
+                return True
+
+        elif std_up == "WCAG":
+            if r_cat.lower().startswith(cat_target[:3].lower()) or cat_target.lower().startswith(r_cat[:3].lower()):
+                return True
+
+        return False
 
     def filter_by_category(self, standard: str, category: str):
         """Pre-filters table by selected category from Checkpoints view."""
-        self.rule_ids_filter = None
-        self.combo_std.setCurrentText(standard if standard in ["PDF/UA", "WCAG", "Quality", "AI"] else "All Standards")
-        self.search_input.setText(category)
-        self.btn_all.setChecked(True)
+        self._programmatic_change = True
+        try:
+            self.rule_ids_filter = None
+            self.category_filter = category
+            target_std = standard if standard in ["PDF/UA", "WCAG", "Quality", "AI"] else "All Standards"
+            self.combo_std.setCurrentText(target_std)
+            self.search_input.setText(category)
+            self.btn_all.setChecked(True)
+        finally:
+            self._programmatic_change = False
         self._apply_filters()
 
     def filter_by_rule_ids(self, rule_ids: List[str], standard: str = "All Standards", category_label: str = ""):
         """Pre-filters table by specific rule IDs (e.g. for Quality checkpoint mapping)."""
-        self.rule_ids_filter = list(rule_ids)
-        self.combo_std.setCurrentText(standard if standard in ["PDF/UA", "WCAG", "Quality", "AI"] else "All Standards")
-        self.search_input.clear()
-        self.btn_all.setChecked(True)
+        self._programmatic_change = True
+        try:
+            self.rule_ids_filter = list(rule_ids)
+            self.category_filter = None
+            target_std = standard if standard in ["PDF/UA", "WCAG", "Quality", "AI"] else "All Standards"
+            self.combo_std.setCurrentText(target_std)
+            self.search_input.clear()
+            self.btn_all.setChecked(True)
+        finally:
+            self._programmatic_change = False
         self._apply_filters()
 
     def _apply_filters(self):
         query = self.search_input.text().lower().strip()
         std_filter = self.combo_std.currentText()
+
+        # If user manually changed or cleared the search text, reset category_filter
+        if not self._programmatic_change and self.category_filter and query != self.category_filter.lower():
+            if not query or self.category_filter.lower() not in query:
+                self.category_filter = None
 
         # Status filter
         status_filter = None
@@ -165,10 +228,18 @@ class DetailedResultsView(QWidget):
                 continue
             if std_filter != "All Standards" and r.standard.upper() != std_filter.upper():
                 continue
-            if query:
-                combined_text = f"{r.check_id} {r.name} {r.category} {r.message} {r.evidence}".lower()
-                if query not in combined_text:
+            if self.category_filter is not None:
+                if not self._matches_category(r, self.category_filter):
                     continue
+            if query:
+                # If query matches active category filter, category matching above is already authoritative.
+                # Only perform substring text search if query is different from category filter.
+                if self.category_filter and query == self.category_filter.lower():
+                    pass
+                else:
+                    combined_text = f"{r.check_id} {r.name} {r.category} {r.message} {r.evidence}".lower()
+                    if query not in combined_text:
+                        continue
             filtered.append(r)
 
         self.filtered_findings = filtered

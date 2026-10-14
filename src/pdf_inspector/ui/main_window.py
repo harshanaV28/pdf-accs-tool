@@ -455,7 +455,7 @@ class MainWindow(QMainWindow):
         else:
             cat_findings = [
                 r for r in self.current_report.results
-                if r.standard.upper() == standard.upper() and r.category.lower() == category.lower()
+                if r.standard.upper() == standard.upper() and self.detailed_view._matches_category(r, category)
             ]
             counts = self.current_report.get_category_counts(standard).get(
                 category, {"passed": 0, "warned": 0, "failed": 0, "manual": 0}
