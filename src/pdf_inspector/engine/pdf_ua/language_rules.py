@@ -4,6 +4,7 @@ Verifies that the document and text elements have valid language specifications 
 """
 
 from typing import List
+import os
 import re
 from ..rule_base import BaseRule
 from ...core.models import PDFDocumentModel, CheckResult, CheckStatus, Severity
@@ -43,7 +44,27 @@ class DocumentLanguageRule(BaseRule):
                 ))
             else:
                 total_text_units = 0
-                if hasattr(doc, "pages") and doc.pages:
+                if doc.filepath and os.path.exists(doc.filepath):
+                    try:
+                        import pikepdf
+                        with pikepdf.open(doc.filepath) as pdf:
+                            count = 0
+                            for p in pdf.pages:
+                                for op in pikepdf.parse_content_stream(p):
+                                    op_str = str(op.operator)
+                                    if op_str in ("Tj", "'", '"'):
+                                        count += 1
+                                    elif op_str == "TJ":
+                                        for item in op.operands[0]:
+                                            if isinstance(item, (pikepdf.String, bytes)):
+                                                count += 1
+                            if count > 0:
+                                links_cnt = len(doc.links) if hasattr(doc, "links") and doc.links else 0
+                                total_text_units = count + links_cnt
+                    except Exception:
+                        pass
+
+                if total_text_units == 0 and hasattr(doc, "pages") and doc.pages:
                     total_text_units = sum(len(p.text.split()) for p in doc.pages if p.text)
                 if total_text_units == 0 and doc.structure_tree:
                     all_nodes = doc.structure_tree.find_all_nodes()

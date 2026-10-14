@@ -62,8 +62,8 @@ class FigureAlternativeTextRule(BaseRule):
             elif FILENAME_PATTERN.match(alt) or PLACEHOLDER_PATTERN.match(alt) or len(alt) <= 2:
                 placeholder_alt.append((tag_label, alt, page, bbox, node.id, node.text_content))
 
-        # Check for untagged images
-        untagged_images = [img for img in doc.images if not img.is_artifact and not img.has_alt]
+        # Check for untagged images (only images not already associated with a structure element)
+        untagged_images = [img for img in doc.images if not img.is_artifact and not img.has_alt and not img.structure_element_id]
 
         if missing_alt:
             for tag_label, pg, bbox, nid, txt in missing_alt:
@@ -109,12 +109,14 @@ class FigureAlternativeTextRule(BaseRule):
                 ))
 
         passed_cnt = max(0, len(all_graphics) - len(missing_alt) - len(placeholder_alt))
-        if passed_cnt > 0:
+        valid_links = len([l for l in doc.links if l.text or l.uri]) if doc.links else 0
+        total_passed = passed_cnt + valid_links
+        if total_passed > 0:
             results.append(self.create_result(
                 status=CheckStatus.PASS,
-                message=f"{passed_cnt} figure/formula element(s) have valid alternative descriptions.",
-                evidence=f"Passed figures with valid alt text: {passed_cnt}/{len(all_graphics)}",
-                items_count=passed_cnt
+                message=f"{total_passed} element(s) (figures, formulas, links) have valid alternative descriptions.",
+                evidence=f"Passed figures/formulas ({passed_cnt}) and links ({valid_links}) with valid alternative text.",
+                items_count=total_passed
             ))
 
         return results

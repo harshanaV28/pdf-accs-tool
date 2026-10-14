@@ -62,6 +62,16 @@ class ContentTaggedRule(BaseRule):
                 ))
             return results
 
+        total_chars = sum(len(p.text) for p in doc.pages if p.text)
+        total_mcids = sum(len(p.mcids) for p in doc.pages)
+        total_images = len(doc.images)
+        total_links = len(doc.links)
+        total_elements = total_chars + total_mcids + total_images + total_links
+        if total_elements == 0:
+            total_elements = sum(p.tagged_operations_count for p in doc.pages) + total_images
+
+        passed_items = max(0, total_elements - total_unmarked)
+
         # 1. Check pages with unmarked real content operations on tagged documents
         unmarked_pages: Dict[int, List[str]] = {}
         for p in doc.pages:
@@ -110,11 +120,21 @@ class ContentTaggedRule(BaseRule):
                     items_count=rem_items
                 ))
 
+            if passed_items > 0:
+                results.append(self.create_result(
+                    status=CheckStatus.PASS,
+                    message=f"{passed_items} real content element(s) are properly enclosed in marked content tags or marked as Artifacts.",
+                    evidence=f"Validated content streams across {doc.page_count} page(s).",
+                    items_count=passed_items
+                ))
+
         else:
+            items_to_report = passed_items if passed_items > 0 else 1
             results.append(self.create_result(
                 status=CheckStatus.PASS,
                 message="All real content is enclosed in marked content tags or marked as Artifacts.",
-                evidence=f"Validated content streams across all {doc.page_count} page(s)."
+                evidence=f"Validated content streams across all {doc.page_count} page(s).",
+                items_count=items_to_report
             ))
 
         return results

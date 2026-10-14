@@ -481,11 +481,13 @@ class DocumentParser:
                                                         snippets.append(" ".join(nearby_words[:12]))
                                                 except Exception:
                                                     pass
-                                            xobject_artifact_cache[xref] = (len(xo_art_matches), snippets)
+                                            xo_has_mcid = bool(re.search(r"/MCID", xo_stream))
+                                            xo_has_paint = bool(re.search(r"\b(re|Do|Tj|TJ|'|\"|f\*?|F|s|S|b\*?|B\*?|m|l)\b", xo_stream))
+                                            xobject_artifact_cache[xref] = (len(xo_art_matches), snippets, xo_has_mcid, xo_has_paint)
                                         except Exception:
-                                            xobject_artifact_cache[xref] = (0, [])
+                                            xobject_artifact_cache[xref] = (0, [], False, False)
 
-                                    xo_arts_cnt, xo_snippets = xobject_artifact_cache[xref]
+                                    xo_arts_cnt, xo_snippets, xo_has_mcid, xo_has_paint = xobject_artifact_cache[xref]
                                     if xo_arts_cnt > 0:
                                         snippet_text = xo_snippets[0] if xo_snippets else ""
                                         bbox_tuple = (float(xo_rect[0]), float(xo_rect[1]), float(xo_rect[2]), float(xo_rect[3])) if xo_rect else None
@@ -516,15 +518,16 @@ class DocumentParser:
                                                 ))
                                     elif not in_tagged and not in_art:
                                         # Form XObject containing real content executed outside marked content
-                                        unmarked_count += 1
-                                        page_content_occs.append(ContentOccurrenceModel(
-                                            page_number=page_idx,
-                                            operator_type="xobject",
-                                            operator_name="Do",
-                                            is_unmarked_real_content=True,
-                                            xobject_name=xname,
-                                            snippet=f"XObject /{xname} Do"
-                                        ))
+                                        if xo_has_paint and not xo_has_mcid:
+                                            unmarked_count += 1
+                                            page_content_occs.append(ContentOccurrenceModel(
+                                                page_number=page_idx,
+                                                operator_type="xobject",
+                                                operator_name="Do",
+                                                is_unmarked_real_content=True,
+                                                xobject_name=xname,
+                                                snippet=f"XObject /{xname} Do"
+                                            ))
                                 elif not in_tagged and not in_art:
                                     # XObject Do outside marked content and not in xobj_info
                                     unmarked_count += 1
@@ -640,6 +643,12 @@ class DocumentParser:
                 embedded_files_count = fitz_doc.embfile_count()
             except Exception:
                 embedded_files_count = 0
+
+            if "/AF" in pike_doc.Root:
+                try:
+                    embedded_files_count += len(pike_doc.Root["/AF"])
+                except Exception:
+                    pass
 
             # 13. Extract and validate unique Form XObjects in document resources (ISO 32000-1 Clause 8.10)
             form_xobjects: List[FormXObjectModel] = []

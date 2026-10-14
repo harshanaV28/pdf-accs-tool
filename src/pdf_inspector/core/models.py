@@ -617,7 +617,9 @@ class AuditReport:
                     seen_unembedded_fonts.add(font_key)
 
                 cnt = r.items_count if (hasattr(r, "items_count") and r.items_count is not None) else 1
-                if r.status == CheckStatus.PASS:
+                if target == "Fonts" and r.status == CheckStatus.PASS:
+                    counts[target]["passed"] = max(counts[target]["passed"], cnt)
+                elif r.status == CheckStatus.PASS:
                     counts[target]["passed"] += cnt
                 elif r.status == CheckStatus.WARNING:
                     counts[target]["warned"] += cnt

@@ -78,11 +78,19 @@ class PageTabOrderRule(BaseRule):
                 items_count=1
             ))
         else:
+            applicable_pages = sum(
+                1 for p in doc.pages
+                if getattr(p, "has_tab_order", False)
+                or p.tab_order_mode == "S"
+                or p.links_count > 0
+                or getattr(p, "annotations_count", 0) > 0
+            )
+            items_cnt = max(1, applicable_pages)
             results.append(self.create_result(
                 status=CheckStatus.PASS,
                 message="All pages specify Structure tab order (/Tabs /S) or contain no interactive annotations.",
-                evidence="Page tab navigation conforms to document structure order (/Tabs /S).",
-                items_count=1
+                evidence=f"Page tab navigation conforms to document structure order (/Tabs /S) across {items_cnt} page(s).",
+                items_count=items_cnt
             ))
 
         return results
