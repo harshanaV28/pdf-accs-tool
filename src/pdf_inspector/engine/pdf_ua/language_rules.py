@@ -59,8 +59,7 @@ class DocumentLanguageRule(BaseRule):
                                             if isinstance(item, (pikepdf.String, bytes)):
                                                 count += 1
                             if count > 0:
-                                links_cnt = len(doc.links) if hasattr(doc, "links") and doc.links else 0
-                                total_text_units = count + links_cnt
+                                total_text_units = count
                     except Exception:
                         pass
 

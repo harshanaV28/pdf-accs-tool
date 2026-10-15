@@ -25,6 +25,10 @@ from src.pdf_inspector.engine.quality.quality_rules import (
     TableRegularityQualityRule,
     ArtifactedContentOnPageBodyRule,
     LinkCompletenessQualityRule,
+    DocumentTitleQualityRule,
+    BookmarksIfHeadingsQualityRule,
+    ListItemStructureQualityRule,
+    AlternativeTextValidityQualityRule,
 )
 
 
@@ -223,7 +227,7 @@ def test_note_contains_label_quality_rule():
 def test_paragraph_contains_note_quality_rule():
     rule = ParagraphContainsNoteQualityRule()
 
-    # Note inside P -> PASS
+    # Case 1: Note inside P -> WARNING
     note = StructureNode(id="note1", tag="Note", standard_tag="Note", page=1)
     p_node = StructureNode(id="p1", tag="P", standard_tag="P", page=1, children=[note])
     root = StructureNode(id="root", tag="StructTreeRoot", standard_tag="StructTreeRoot", children=[p_node])
@@ -233,7 +237,18 @@ def test_paragraph_contains_note_quality_rule():
     )
     res = rule.evaluate(doc)
     assert len(res) == 1
-    assert res[0].status == CheckStatus.PASS
+    assert res[0].status == CheckStatus.WARNING
+
+    # Case 2: Note outside P -> PASS
+    p_sibling = StructureNode(id="p2", tag="P", standard_tag="P", page=1)
+    root_pass = StructureNode(id="root", tag="StructTreeRoot", standard_tag="StructTreeRoot", children=[p_sibling, note])
+    doc_pass = PDFDocumentModel(
+        filepath="sample.pdf", filename="sample.pdf", filesize=1000, pdf_version="1.7",
+        page_count=1, is_tagged=True, structure_tree=root_pass
+    )
+    res_pass = rule.evaluate(doc_pass)
+    assert len(res_pass) == 1
+    assert res_pass[0].status == CheckStatus.PASS
 
 
 def test_heading_hierarchy_quality_rule():
@@ -292,8 +307,8 @@ def test_table_regularity_quality_rule():
     assert res_reg[0].status == CheckStatus.PASS
     assert res_reg[0].items_count == 2
 
-    # Case 3: Mixed regular and irregular tables -> WARNING for irregular, PASS for regular
-    t_irreg = TableModel(id="tbl3", page=3, rows_count=4, cols_count=3, has_headers=True, header_cells_count=3, data_cells_count=9, is_regular=False, bbox=(0, 0, 100, 100))
+    # Case 3: Mixed complete and incomplete tables -> WARNING for incomplete, PASS for complete
+    t_irreg = TableModel(id="tbl3", page=3, rows_count=0, cols_count=0, has_headers=False, header_cells_count=0, data_cells_count=0, is_regular=False, bbox=(0, 0, 100, 100))
     doc_mixed = PDFDocumentModel(filepath="", filename="t.pdf", filesize=10, pdf_version="1.7", page_count=3, tables=[t1, t_irreg])
     res_mixed = rule.evaluate(doc_mixed)
     assert len(res_mixed) == 2
@@ -312,14 +327,12 @@ def test_artifacted_content_on_page_body_rule():
     doc_noart = PDFDocumentModel(filepath="", filename="a.pdf", filesize=10, pdf_version="1.7", page_count=1, pages=[p0])
     assert rule.evaluate(doc_noart) == []
 
-    # Case 2: Strictly pagination artifact -> PASS with items_count=0
+    # Case 2: Strictly pagination artifact -> valid, returns [] (PAC displays '-')
     art_page = ArtifactOccurrenceModel(page_number=1, is_inside_tagged=False, text_snippet="Page 1 of 5")
     p1 = PageModel(page_number=1, width=612, height=792, artifacts=[art_page])
     doc_pag = PDFDocumentModel(filepath="", filename="a.pdf", filesize=10, pdf_version="1.7", page_count=1, pages=[p1])
     res_pag = rule.evaluate(doc_pag)
-    assert len(res_pag) == 1
-    assert res_pag[0].status == CheckStatus.PASS
-    assert res_pag[0].items_count == 0
+    assert res_pag == []
 
     # Case 3: Readable body text artifact -> WARNING
     art_body = ArtifactOccurrenceModel(page_number=1, is_inside_tagged=False, text_snippet="Important substantive text in body")
@@ -339,14 +352,14 @@ def test_link_completeness_quality_rule():
     doc_nolinks = PDFDocumentModel(filepath="", filename="l.pdf", filesize=10, pdf_version="1.7", page_count=1, is_tagged=True, structure_tree=root_empty)
     assert rule.evaluate(doc_nolinks) == []
 
-    # Case 2: Complete link with text -> PASS with items_count=0
+    # Case 2: Complete link with text -> PASS with items_count=1
     lnk_good = StructureNode(id="lnk1", tag="Link", standard_tag="Link", page=1, text_content="Visit Website")
     root_good = StructureNode(id="root", tag="StructTreeRoot", standard_tag="StructTreeRoot", children=[lnk_good])
     doc_good = PDFDocumentModel(filepath="", filename="l.pdf", filesize=10, pdf_version="1.7", page_count=1, is_tagged=True, structure_tree=root_good)
     res_good = rule.evaluate(doc_good)
     assert len(res_good) == 1
     assert res_good[0].status == CheckStatus.PASS
-    assert res_good[0].items_count == 0
+    assert res_good[0].items_count == 1
 
     # Case 3: Incomplete empty link -> FAIL with items_count=1
     lnk_bad = StructureNode(id="lnk2", tag="Link", standard_tag="Link", page=1, text_content="")
@@ -356,3 +369,246 @@ def test_link_completeness_quality_rule():
     assert len(res_bad) == 1
     assert res_bad[0].status == CheckStatus.FAIL
     assert res_bad[0].items_count == 1
+
+
+def test_document_title_quality_rule():
+    rule = DocumentTitleQualityRule()
+
+    # Case 1: Valid title + DisplayDocTitle True -> PASS (1)
+    doc_valid = PDFDocumentModel(
+        filepath="", filename="report.pdf", filesize=10, pdf_version="1.7",
+        page_count=1, title="Quarterly Financial Report", display_doc_title=True
+    )
+    res_valid = rule.evaluate(doc_valid)
+    assert len(res_valid) == 1
+    assert res_valid[0].status == CheckStatus.PASS
+    assert res_valid[0].items_count == 1
+
+    # Case 2: Missing title -> FAIL (1)
+    doc_notitle = PDFDocumentModel(
+        filepath="", filename="report.pdf", filesize=10, pdf_version="1.7",
+        page_count=1, title="", display_doc_title=True
+    )
+    res_notitle = rule.evaluate(doc_notitle)
+    assert len(res_notitle) == 1
+    assert res_notitle[0].status == CheckStatus.FAIL
+    assert "missing" in res_notitle[0].message.lower()
+
+    # Case 3: Title matches filename -> FAIL (1)
+    doc_fn = PDFDocumentModel(
+        filepath="", filename="report.pdf", filesize=10, pdf_version="1.7",
+        page_count=1, title="report.pdf", display_doc_title=True
+    )
+    res_fn = rule.evaluate(doc_fn)
+    assert len(res_fn) == 1
+    assert res_fn[0].status == CheckStatus.FAIL
+    assert "matches the filename" in res_fn[0].message
+
+    # Case 4: Title valid but DisplayDocTitle False -> FAIL (1)
+    doc_nodisp = PDFDocumentModel(
+        filepath="", filename="report.pdf", filesize=10, pdf_version="1.7",
+        page_count=1, title="Quarterly Financial Report", display_doc_title=False
+    )
+    res_nodisp = rule.evaluate(doc_nodisp)
+    assert len(res_nodisp) == 1
+    assert res_nodisp[0].status == CheckStatus.FAIL
+    assert "DisplayDocTitle is false" in res_nodisp[0].message
+
+
+def test_bookmarks_if_headings_quality_rule():
+    rule = BookmarksIfHeadingsQualityRule()
+
+    # Case 1: No headings in document -> [] (displays '-' in PAC)
+    root_no_h = StructureNode(id="root", tag="StructTreeRoot", standard_tag="StructTreeRoot")
+    doc_no_h = PDFDocumentModel(
+        filepath="", filename="d.pdf", filesize=10, pdf_version="1.7",
+        page_count=2, is_tagged=True, structure_tree=root_no_h
+    )
+    assert rule.evaluate(doc_no_h) == []
+
+    # Case 2: Headings exist AND bookmarks exist -> PASS (1)
+    h1 = StructureNode(id="h1", tag="H1", standard_tag="H1", page=1)
+    root_with_h = StructureNode(id="root", tag="StructTreeRoot", standard_tag="StructTreeRoot", children=[h1])
+    doc_with_bm = PDFDocumentModel(
+        filepath="", filename="d.pdf", filesize=10, pdf_version="1.7",
+        page_count=2, is_tagged=True, structure_tree=root_with_h, bookmarks=[{"title": "Section 1", "page": 1}]
+    )
+    res_bm = rule.evaluate(doc_with_bm)
+    assert len(res_bm) == 1
+    assert res_bm[0].status == CheckStatus.PASS
+    assert res_bm[0].items_count == 1
+
+    # Case 3: Headings exist BUT NO bookmarks -> WARNING (1)
+    doc_no_bm = PDFDocumentModel(
+        filepath="", filename="d.pdf", filesize=10, pdf_version="1.7",
+        page_count=2, is_tagged=True, structure_tree=root_with_h, bookmarks=[]
+    )
+    res_no_bm = rule.evaluate(doc_no_bm)
+    assert len(res_no_bm) == 1
+    assert res_no_bm[0].status == CheckStatus.WARNING
+    assert res_no_bm[0].items_count == 1
+
+
+def test_list_item_structure_quality_rule():
+    rule = ListItemStructureQualityRule()
+
+    # Case 1: No list items in document -> [] (displays '-' in PAC)
+    root_empty = StructureNode(id="root", tag="StructTreeRoot", standard_tag="StructTreeRoot")
+    doc_empty = PDFDocumentModel(
+        filepath="", filename="d.pdf", filesize=10, pdf_version="1.7",
+        page_count=1, is_tagged=True, structure_tree=root_empty
+    )
+    assert rule.evaluate(doc_empty) == []
+
+    # Case 2: All valid LI elements (LI contains Lbl and LBody) -> PASS (count=2)
+    lbl1 = StructureNode(id="lbl1", tag="Lbl", standard_tag="Lbl")
+    lbody1 = StructureNode(id="lb1", tag="LBody", standard_tag="LBody")
+    li1 = StructureNode(id="li1", tag="LI", standard_tag="LI", children=[lbl1, lbody1])
+
+    lbl2 = StructureNode(id="lbl2", tag="Lbl", standard_tag="Lbl")
+    lbody2 = StructureNode(id="lb2", tag="LBody", standard_tag="LBody")
+    li2 = StructureNode(id="li2", tag="LI", standard_tag="LI", children=[lbl2, lbody2])
+
+    l_node = StructureNode(id="l1", tag="L", standard_tag="L", children=[li1, li2])
+    root_valid = StructureNode(id="root", tag="StructTreeRoot", standard_tag="StructTreeRoot", children=[l_node])
+    doc_valid = PDFDocumentModel(
+        filepath="", filename="d.pdf", filesize=10, pdf_version="1.7",
+        page_count=1, is_tagged=True, structure_tree=root_valid
+    )
+    res_valid = rule.evaluate(doc_valid)
+    assert len(res_valid) == 1
+    assert res_valid[0].status == CheckStatus.PASS
+    assert res_valid[0].items_count == 2
+
+    # Case 3: Invalid LI element (contains direct Span without LBody) -> FAIL
+    span_bad = StructureNode(id="s1", tag="Span", standard_tag="Span", text_content="bad")
+    li_bad = StructureNode(id="li3", tag="LI", standard_tag="LI", children=[span_bad])
+    l_mixed = StructureNode(id="l2", tag="L", standard_tag="L", children=[li1, li_bad])
+    root_mixed = StructureNode(id="root", tag="StructTreeRoot", standard_tag="StructTreeRoot", children=[l_mixed])
+    doc_mixed = PDFDocumentModel(
+        filepath="", filename="d.pdf", filesize=10, pdf_version="1.7",
+        page_count=1, is_tagged=True, structure_tree=root_mixed
+    )
+    res_mixed = rule.evaluate(doc_mixed)
+    fails = [r for r in res_mixed if r.status == CheckStatus.FAIL]
+    passes = [r for r in res_mixed if r.status == CheckStatus.PASS]
+    assert len(fails) == 1
+    assert fails[0].items_count == 1
+    assert len(passes) == 1
+    assert passes[0].items_count == 1
+
+
+def test_alternative_text_validity_quality_rule():
+    rule = AlternativeTextValidityQualityRule()
+
+    # Case 1: Empty document with no graphics -> [] (renders as '-' in PAC)
+    root_empty = StructureNode(id="root", tag="StructTreeRoot", standard_tag="StructTreeRoot")
+    doc_empty = PDFDocumentModel(
+        filepath="", filename="d.pdf", filesize=10, pdf_version="1.7",
+        page_count=1, is_tagged=True, structure_tree=root_empty
+    )
+    assert rule.evaluate(doc_empty) == []
+
+    # Case 2: Figure without any alt text attribute (alt_text=None) -> []
+    fig_no_alt = StructureNode(id="fig1", tag="Figure", standard_tag="Figure", page=1)
+    root_no_alt = StructureNode(id="root", tag="StructTreeRoot", standard_tag="StructTreeRoot", children=[fig_no_alt])
+    doc_no_alt = PDFDocumentModel(
+        filepath="", filename="d.pdf", filesize=10, pdf_version="1.7",
+        page_count=1, is_tagged=True, structure_tree=root_no_alt
+    )
+    assert rule.evaluate(doc_no_alt) == []
+
+    # Case 3: Figure with valid descriptive alt text -> PASS (count=1)
+    fig_valid = StructureNode(
+        id="fig2", tag="Figure", standard_tag="Figure", page=1,
+        alt_text="Quarterly sales bar chart comparing Q1 through Q4 revenue",
+        bbox=(50.0, 50.0, 200.0, 200.0)
+    )
+    root_valid = StructureNode(id="root", tag="StructTreeRoot", standard_tag="StructTreeRoot", children=[fig_valid])
+    doc_valid = PDFDocumentModel(
+        filepath="", filename="d.pdf", filesize=10, pdf_version="1.7",
+        page_count=1, is_tagged=True, structure_tree=root_valid
+    )
+    res_valid = rule.evaluate(doc_valid)
+    assert len(res_valid) == 1
+    assert res_valid[0].status == CheckStatus.PASS
+    assert res_valid[0].items_count == 1
+
+    # Case 4: Figure with filename as alt text -> WARNING
+    fig_file = StructureNode(
+        id="fig3", tag="Figure", standard_tag="Figure", page=1,
+        alt_text="sales_chart_final.png",
+        bbox=(50.0, 50.0, 200.0, 200.0)
+    )
+    root_file = StructureNode(id="root", tag="StructTreeRoot", standard_tag="StructTreeRoot", children=[fig_file])
+    doc_file = PDFDocumentModel(
+        filepath="", filename="d.pdf", filesize=10, pdf_version="1.7",
+        page_count=1, is_tagged=True, structure_tree=root_file
+    )
+    res_file = rule.evaluate(doc_file)
+    assert len(res_file) == 1
+    assert res_file[0].status == CheckStatus.WARNING
+    assert "file name" in res_file[0].message
+
+    # Case 5: Figure with generic placeholder alt text -> WARNING
+    fig_ph = StructureNode(
+        id="fig4", tag="Figure", standard_tag="Figure", page=1,
+        alt_text="photo",
+        bbox=(50.0, 50.0, 200.0, 200.0)
+    )
+    root_ph = StructureNode(id="root", tag="StructTreeRoot", standard_tag="StructTreeRoot", children=[fig_ph])
+    doc_ph = PDFDocumentModel(
+        filepath="", filename="d.pdf", filesize=10, pdf_version="1.7",
+        page_count=1, is_tagged=True, structure_tree=root_ph
+    )
+    res_ph = rule.evaluate(doc_ph)
+    assert len(res_ph) == 1
+    assert res_ph[0].status == CheckStatus.WARNING
+    assert "placeholder" in res_ph[0].message
+
+    # Case 6: Figure with pure whitespace alt text -> WARNING
+    fig_white = StructureNode(
+        id="fig5", tag="Figure", standard_tag="Figure", page=1,
+        alt_text="   \t   ",
+        bbox=(50.0, 50.0, 200.0, 200.0)
+    )
+    root_white = StructureNode(id="root", tag="StructTreeRoot", standard_tag="StructTreeRoot", children=[fig_white])
+    doc_white = PDFDocumentModel(
+        filepath="", filename="d.pdf", filesize=10, pdf_version="1.7",
+        page_count=1, is_tagged=True, structure_tree=root_white
+    )
+    res_white = rule.evaluate(doc_white)
+    assert len(res_white) == 1
+    assert res_white[0].status == CheckStatus.WARNING
+    assert "whitespace" in res_white[0].message
+
+    # Case 7: Decorative figure is ignored
+    fig_deco = StructureNode(
+        id="fig6", tag="Figure", standard_tag="Figure", page=1,
+        alt_text="",
+        actual_text=""
+    )
+    # If standard_tag is Artifact or tag is Artifact
+    fig_deco.standard_tag = "Artifact"
+    root_deco = StructureNode(id="root", tag="StructTreeRoot", standard_tag="StructTreeRoot", children=[fig_deco])
+    doc_deco = PDFDocumentModel(
+        filepath="", filename="d.pdf", filesize=10, pdf_version="1.7",
+        page_count=1, is_tagged=True, structure_tree=root_deco
+    )
+    assert rule.evaluate(doc_deco) == []
+
+    # Case 8: Mixed document with valid and invalid items produces accurate pass/warn counts
+    root_mixed = StructureNode(
+        id="root", tag="StructTreeRoot", standard_tag="StructTreeRoot",
+        children=[fig_valid, fig_file, fig_ph]
+    )
+    doc_mixed = PDFDocumentModel(
+        filepath="", filename="d.pdf", filesize=10, pdf_version="1.7",
+        page_count=1, is_tagged=True, structure_tree=root_mixed
+    )
+    res_mixed = rule.evaluate(doc_mixed)
+    warns = [r for r in res_mixed if r.status == CheckStatus.WARNING]
+    passes = [r for r in res_mixed if r.status == CheckStatus.PASS]
+    assert len(warns) == 2
+    assert len(passes) == 1
+    assert passes[0].items_count == 1

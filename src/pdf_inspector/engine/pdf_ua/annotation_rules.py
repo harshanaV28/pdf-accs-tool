@@ -59,18 +59,26 @@ class PageTabOrderRule(BaseRule):
         if not doc.pages:
             return results
 
-        violating_pages = [p.page_number for p in doc.pages if p.tab_order_mode != "S"]
-        has_annots = any(
-            getattr(p, "annotations_count", 0) > 0
+        # Under ISO 14289-1:2014, Clause 7.18.1 / Matterhorn Checkpoint 17-001,
+        # tab order is required on pages that contain annotations. Pages without annotations
+        # have no interactive tab navigation sequence.
+        pages_with_annots = [
+            p.page_number for p in doc.pages
+            if getattr(p, "annotations_count", 0) > 0
             or p.links_count > 0
             or any(a.page == p.page_number for a in doc.annotations)
-            for p in doc.pages
-        )
+        ]
+        has_annots = len(pages_with_annots) > 0
 
-        if violating_pages and (not doc.is_tagged or has_annots):
+        violating_pages = [
+            p.page_number for p in doc.pages
+            if p.tab_order_mode != "S" and (p.page_number in pages_with_annots or not doc.is_tagged)
+        ]
+
+        if violating_pages:
             results.append(self.create_result(
                 status=CheckStatus.FAIL,
-                message=f"{len(violating_pages)} page(s) do not specify Structure tab order (/Tabs /S).",
+                message=f"{len(violating_pages)} page(s) containing annotations do not specify Structure tab order (/Tabs /S).",
                 evidence=f"Pages lacking /Tabs /S: {violating_pages[:5]}",
                 page=violating_pages[0],
                 custom_severity=Severity.HIGH,
@@ -78,14 +86,7 @@ class PageTabOrderRule(BaseRule):
                 items_count=1
             ))
         else:
-            applicable_pages = sum(
-                1 for p in doc.pages
-                if getattr(p, "has_tab_order", False)
-                or p.tab_order_mode == "S"
-                or p.links_count > 0
-                or getattr(p, "annotations_count", 0) > 0
-            )
-            items_cnt = max(1, applicable_pages)
+            items_cnt = len(pages_with_annots) if pages_with_annots else 1
             results.append(self.create_result(
                 status=CheckStatus.PASS,
                 message="All pages specify Structure tab order (/Tabs /S) or contain no interactive annotations.",

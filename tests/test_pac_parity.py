@@ -287,6 +287,7 @@ def test_pac_parity_idea_ua_report():
     assert quality_counts['"TOCI" elements contain "Link" elements']["passed"] == 0  # renders as '-'
     assert quality_counts['"TOCI" elements correctly linked to headings']["passed"] == 0  # renders as '-'
     assert quality_counts["Alternative text on text elements"]["passed"] == 0  # renders as '-'
+    assert quality_counts["Validity of alternate text"]["passed"] == 3  # 3 Figures with valid alt text
     assert quality_counts['Completeness of "Link" elements']["passed"] == 0  # renders as '-'
     assert quality_counts['Formal correctness of "LI" elements']["passed"] == 10  # 10 LI tags matching PAC exactly
     assert quality_counts['Completeness of "Table" elements']["passed"] == 1  # 1 Table matching PAC exactly
@@ -541,3 +542,72 @@ def test_pac_parity_pdf03_fonts():
     assert font_counts.get("failed") == 4
 
 
+def test_synthetic_form_xobjects_traversal(tmp_path):
+    """Synthetic test verifying reachable, nested, repeated-reference, and unreferenced Form XObjects."""
+    import pikepdf
+    from src.pdf_inspector.core.document_parser import DocumentParser
+
+    pdf_path = str(tmp_path / "synthetic_forms.pdf")
+    pdf = pikepdf.new()
+    p1 = pdf.add_blank_page()
+    p2 = pdf.add_blank_page()
+
+    # 1. Reachable root Form XObject (f1)
+    f1 = pdf.make_stream(b"q /F2 Do Q")
+    f1.Type = pikepdf.Name.XObject
+    f1.Subtype = pikepdf.Name.Form
+    f1.BBox = [0, 0, 200, 200]
+    f1.Matrix = [1, 0, 0, 1, 0, 0]
+
+    # 2. Reachable nested Form XObject (f2 inside f1)
+    f2 = pdf.make_stream(b"q Q")
+    f2.Type = pikepdf.Name.XObject
+    f2.Subtype = pikepdf.Name.Form
+    f2.BBox = [0, 0, 100, 100]
+
+    f1.Resources = pikepdf.Dictionary()
+    f1.Resources.XObject = pikepdf.Dictionary()
+    f1.Resources.XObject.F2 = f2
+
+    # 3. Image XObject (must NOT be counted as Form XObject)
+    img = pdf.make_stream(b"\x00\x00\x00")
+    img.Type = pikepdf.Name.XObject
+    img.Subtype = pikepdf.Name.Image
+    img.Width = 1
+    img.Height = 1
+    img.ColorSpace = pikepdf.Name.DeviceRGB
+    img.BitsPerComponent = 8
+
+    # Assign f1 and image to page 1 resources
+    p1.Resources = pikepdf.Dictionary()
+    p1.Resources.XObject = pikepdf.Dictionary()
+    p1.Resources.XObject.Form1 = f1
+    p1.Resources.XObject.Image1 = img
+
+    # 4. Repeated reference to f1 on page 2 (must NOT be double counted)
+    p2.Resources = pikepdf.Dictionary()
+    p2.Resources.XObject = pikepdf.Dictionary()
+    p2.Resources.XObject.Form1Repeat = f1
+
+    # 5. Unreferenced orphan Form XObject (not reachable via page resources)
+    f_orphan = pdf.make_stream(b"q Q")
+    f_orphan.Type = pikepdf.Name.XObject
+    f_orphan.Subtype = pikepdf.Name.Form
+    f_orphan.BBox = [0, 0, 50, 50]
+    pdf.Root.OrphanForm = f_orphan
+
+    pdf.save(pdf_path)
+
+    doc = DocumentParser(pdf_path).parse()
+    assert doc is not None
+
+    # Expected: exactly 2 reachable Form XObjects (f1 and nested f2).
+    # f1 repeated on p2 is deduplicated; f_orphan is unreferenced; img is Image subtype.
+    assert len(doc.form_xobjects) == 2
+
+    bboxes = {fo.bbox for fo in doc.form_xobjects}
+    assert (0.0, 0.0, 200.0, 200.0) in bboxes
+    assert (0.0, 0.0, 100.0, 100.0) in bboxes
+
+    # Verify all extracted Form XObjects are valid
+    assert all(fo.is_valid for fo in doc.form_xobjects)

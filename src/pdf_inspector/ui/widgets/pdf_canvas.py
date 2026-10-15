@@ -301,17 +301,18 @@ class PDFCanvas(QWidget):
         finding: Optional[CheckResult] = None,
         doc_model: Optional[Any] = None
     ):
-        """Navigates to a specific page and displays finding in PAC Visual Locator format."""
-        if not self.doc:
-            return
+        target_idx = max(0, page_num_1based - 1)
+        if self.doc:
+            target_idx = min(len(self.doc) - 1, target_idx)
+        self.current_page_idx = target_idx
+        self.highlight_bbox = bbox
+        self.current_finding = finding
 
         if doc_model:
             self.doc_model = doc_model
 
-        target_idx = max(0, min(len(self.doc) - 1, page_num_1based - 1))
-        self.current_page_idx = target_idx
-        self.highlight_bbox = bbox
-        self.current_finding = finding
+        if not self.doc:
+            return
 
         # When a finding is targeted, activate PAC visual locator view
         if finding:

@@ -120,8 +120,7 @@ class CheckpointTableWidget(QTableWidget):
             # Failed column
             item_f = self.item(row, 3)
             if item_f:
-                is_zero_display = (cat == "2.3 Seizures and Physical Reactions" and f == 0)
-                item_f.setText("0" if is_zero_display else (str(f) if f > 0 else "-"))
+                item_f.setText(str(f) if f > 0 else "-")
                 if f > 0:
                     item_f.setForeground(QColor("#dc2626"))
                     item_f.setFont(QFont("Segoe UI", 10, QFont.Bold))
@@ -132,7 +131,7 @@ class CheckpointTableWidget(QTableWidget):
     def _on_row_click(self, row: int, col: int):
         if 0 <= row < len(self.categories):
             cat_name = self.categories[row]
-            self.category_clicked.emit(self.standard_name, cat_name)
+            self.category_selected.emit(self.standard_name, cat_name)
 
     def _on_row_double_click(self, row: int, col: int):
         if 0 <= row < len(self.categories):
@@ -183,22 +182,24 @@ class CheckpointsView(QWidget):
     ]
 
     QUALITY_RULE_MAPPINGS = {
-        "Validity of document title": ["PDFUA-META-002"],
+        "Validity of document title": ["QUAL-TITLE-001"],
         "Artifacted content on page body": ["QUAL-ART-001"],
         "Tagged text consists of only whitespace": ["QUAL-WHITE-001"],
         "Tagged content exists outside of the page boundaries": ["QUAL-BOUND-001"],
         "Presence of headings": ["QUAL-HEAD-001"],
-        "Presence of bookmarks (document outline) if there are headings": ["PDFUA-SETTINGS-003"],
+        "Presence of bookmarks (document outline) if there are headings": ["QUAL-BOOKMARK-001"],
         '"TOCI" elements contain "Link" elements': ["QUAL-TOC-001"],
         '"TOCI" elements correctly linked to headings': ["QUAL-TOC-002"],
         "Alternative text on text elements": ["QUAL-TEXT-001"],
+        "Validity of alternate text": ["QUAL-ALT-001"],
         'Completeness of "Link" elements': ["QUAL-LINK-002"],
-        'Formal correctness of "LI" elements': ["PDFUA-LIST-001"],
+        'Formal correctness of "LI" elements': ["QUAL-LIST-001"],
         'Completeness of "Table" elements': ["QUAL-TABLE-001"],
         '"Note" elements are referenced': ["QUAL-NOTE-001"],
         '"Note" elements contain "Lbl" elements': ["QUAL-NOTE-002"],
         '"P" elements contain "Note" elements': ["QUAL-NOTE-003"],
     }
+
 
     QUALITY_CATEGORIES = list(QUALITY_RULE_MAPPINGS.keys())
 
@@ -357,7 +358,7 @@ class CheckpointsView(QWidget):
         self.btn_refresh.setStyleSheet("font-size: 14px; border-radius: 4px; background: #ffffff;")
         self.btn_refresh.clicked.connect(self.request_rescan)
         self.tab_widget.setCornerWidget(self.btn_refresh, Qt.TopRightCorner)
-
+        self.tab_widget.currentChanged.connect(self._on_tab_changed)
         main_layout.addWidget(self.tab_widget)
 
         # 3. Bottom Toolbar matching PAC layout
@@ -383,13 +384,55 @@ class CheckpointsView(QWidget):
 
         main_layout.addWidget(bottom_bar)
 
+    def _on_tab_changed(self, idx: int):
+        """When switching standard tabs, automatically select the relevant category and sync details."""
+        tables = [self.table_pdf_ua, self.table_wcag, self.table_quality, self.table_ai]
+        if not (0 <= idx < len(tables)):
+            return
+        table = tables[idx]
+        if not table.categories:
+            return
+
+        curr = table.currentRow()
+        if 0 <= curr < len(table.categories):
+            target_row = curr
+        else:
+            target_row = 0
+            found = False
+            for r in range(len(table.categories)):
+                item_f = table.item(r, 3)
+                item_w = table.item(r, 2)
+                if item_f and item_f.text() not in ("-", "0"):
+                    target_row = r
+                    found = True
+                    break
+                if item_w and item_w.text() not in ("-", "0") and not found:
+                    target_row = r
+                    found = True
+
+            if not found:
+                for r in range(len(table.categories)):
+                    item_p = table.item(r, 1)
+                    if item_p and item_p.text() not in ("-", "0"):
+                        target_row = r
+                        break
+
+        table.setCurrentCell(target_row, 0)
+        table.selectRow(target_row)
+        cat_name = table.categories[target_row]
+        self.category_clicked.emit(table.standard_name, cat_name)
+
     def _on_btn_detail_clicked(self):
-        """Dispatches detailed results request, resolving the currently active checkpoint selection if present."""
+        """Dispatches detailed results request, resolving the currently active checkpoint selection."""
         curr_idx = self.tab_widget.currentIndex()
         tables = [self.table_pdf_ua, self.table_wcag, self.table_quality, self.table_ai]
         if 0 <= curr_idx < len(tables):
             table = tables[curr_idx]
             row = table.currentRow()
+            if (row < 0 or row >= len(table.categories)) and len(table.categories) > 0:
+                row = 0
+                table.setCurrentCell(0, 0)
+                table.selectRow(0)
             if 0 <= row < len(table.categories):
                 cat_name = table.categories[row]
                 self.category_selected.emit(table.standard_name, cat_name)

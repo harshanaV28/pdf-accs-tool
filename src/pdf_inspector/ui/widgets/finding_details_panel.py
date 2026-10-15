@@ -221,7 +221,12 @@ class FindingDetailsPanel(QWidget):
                 self.txt_evidence.setPlainText(f"Passed: {p}, Warned: {w}, Failed: {f}")
                 self.txt_remediation.setPlainText("Double-click this row or navigate to 'Detailed Results' to inspect individual findings and page highlights.")
 
-        self.btn_highlight.setEnabled(False)
+        findings_with_page = [r for r in findings if getattr(r, "page", None) is not None]
+        if findings_with_page:
+            self.current_finding = findings_with_page[0]
+            self.btn_highlight.setEnabled(True)
+        else:
+            self.btn_highlight.setEnabled(False)
 
     def display_finding(self, finding: Optional[CheckResult]):
         """Populates panel with the selected finding's properties."""
@@ -275,6 +280,5 @@ class FindingDetailsPanel(QWidget):
         if self.current_finding:
             target_page = self.current_finding.page or 1
             self.highlight_requested.emit(target_page, self.current_finding.bounding_box)
-            self.finding_highlight_requested.emit(self.current_finding)
 
 

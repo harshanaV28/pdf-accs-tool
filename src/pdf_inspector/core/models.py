@@ -532,6 +532,7 @@ class AuditReport:
         '"TOCI" elements contain "Link" elements',
         '"TOCI" elements correctly linked to headings',
         "Alternative text on text elements",
+        "Validity of alternate text",
         'Completeness of "Link" elements',
         'Formal correctness of "LI" elements',
         'Completeness of "Table" elements',
@@ -553,22 +554,24 @@ class AuditReport:
     }
 
     QUALITY_RULE_MAPPINGS = {
-        "Validity of document title": ["PDFUA-META-002"],
+        "Validity of document title": ["QUAL-TITLE-001"],
         "Artifacted content on page body": ["QUAL-ART-001"],
         "Tagged text consists of only whitespace": ["QUAL-WHITE-001"],
         "Tagged content exists outside of the page boundaries": ["QUAL-BOUND-001"],
         "Presence of headings": ["QUAL-HEAD-001"],
-        "Presence of bookmarks (document outline) if there are headings": ["PDFUA-SETTINGS-003"],
+        "Presence of bookmarks (document outline) if there are headings": ["QUAL-BOOKMARK-001"],
         '"TOCI" elements contain "Link" elements': ["QUAL-TOC-001"],
         '"TOCI" elements correctly linked to headings': ["QUAL-TOC-002"],
         "Alternative text on text elements": ["QUAL-TEXT-001"],
+        "Validity of alternate text": ["QUAL-ALT-001"],
         'Completeness of "Link" elements': ["QUAL-LINK-002"],
-        'Formal correctness of "LI" elements': ["PDFUA-LIST-001"],
+        'Formal correctness of "LI" elements': ["QUAL-LIST-001"],
         'Completeness of "Table" elements': ["QUAL-TABLE-001"],
         '"Note" elements are referenced': ["QUAL-NOTE-001"],
         '"Note" elements contain "Lbl" elements': ["QUAL-NOTE-002"],
         '"P" elements contain "Note" elements': ["QUAL-NOTE-003"],
     }
+
 
     def get_category_counts(self, standard: str, pac_mapped: bool = True) -> Dict[str, Dict[str, int]]:
         """Returns {category_name: {'passed': X, 'warned': Y, 'failed': Z, 'manual': W}} mapped to PAC categories."""
@@ -600,8 +603,6 @@ class AuditReport:
             }
             seen_unembedded_fonts = set()
             for r in self.get_results_by_standard("PDF/UA"):
-                if r.check_id == "PDFUA-SETTINGS-003":
-                    continue
                 target = pdfua_map.get(r.category, r.category)
                 if r.category == "Annotations":
                     target = "Document settings" if r.check_id == "PDFUA-ANNOT-002" else "Content"
@@ -617,9 +618,7 @@ class AuditReport:
                     seen_unembedded_fonts.add(font_key)
 
                 cnt = r.items_count if (hasattr(r, "items_count") and r.items_count is not None) else 1
-                if target == "Fonts" and r.status == CheckStatus.PASS:
-                    counts[target]["passed"] = max(counts[target]["passed"], cnt)
-                elif r.status == CheckStatus.PASS:
+                if r.status == CheckStatus.PASS:
                     counts[target]["passed"] += cnt
                 elif r.status == CheckStatus.WARNING:
                     counts[target]["warned"] += cnt
@@ -631,7 +630,8 @@ class AuditReport:
 
         elif std_up == "QUALITY":
             counts = {c: {"passed": 0, "warned": 0, "failed": 0, "manual": 0} for c in self.PAC_QUALITY_CATEGORIES}
-            for cat, rule_ids in self.QUALITY_RULE_MAPPINGS.items():
+            for cat in self.PAC_QUALITY_CATEGORIES:
+                rule_ids = self.QUALITY_RULE_MAPPINGS.get(cat, [])
                 cat_results = [r for r in self.results if r.check_id in rule_ids]
                 p = sum(r.items_count for r in cat_results if r.status == CheckStatus.PASS)
                 w = sum(r.items_count for r in cat_results if r.status == CheckStatus.WARNING)

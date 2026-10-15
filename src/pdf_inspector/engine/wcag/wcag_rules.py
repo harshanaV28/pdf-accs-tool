@@ -49,12 +49,6 @@ def _count_stream_text_strings(doc: PDFDocumentModel) -> int:
     return 0
 
 
-def _get_pdf_syntax_count(doc: PDFDocumentModel) -> int:
-    """Evaluates ISO 32000-1 PDF syntax object count (tags + pages*2 + distinct fonts) matching PAC."""
-    tags_count = len([n for n in doc.structure_tree.find_all_nodes() if n.tag != "StructTreeRoot"]) if doc.structure_tree else 0
-    pages_count = len(doc.pages) if doc.pages else doc.page_count
-    distinct_fonts = len(set(f.name for f in doc.fonts if f.is_used) or doc.fonts)
-    return tags_count + pages_count * 2 + distinct_fonts
 
 
 def _get_natural_language_count(doc: PDFDocumentModel) -> int:
@@ -606,29 +600,6 @@ class WCAGInputAssistanceRule(BaseRule):
         # WCAG 3.3 Input Assistance has 0 automated machine checks in PAC and is reported as not-applicable ('-').
         return []
 
-        results: List[CheckResult] = []
-        for f in doc.form_fields:
-            if f.tooltip and f.tooltip.strip():
-                results.append(self.create_result(
-                    status=CheckStatus.PASS,
-                    message=f"Form field '{f.name}' on page {f.page} has accessible description/tooltip.",
-                    evidence=f"Field '{f.name}' /TU: '{f.tooltip}'",
-                    page=f.page,
-                    bounding_box=f.bbox,
-                    object_reference=f"FormField '{f.name}'"
-                ))
-            else:
-                results.append(self.create_result(
-                    status=CheckStatus.FAIL,
-                    message=f"Form field '{f.name}' lacks an accessible tooltip (/TU description) on page {f.page} (SC 3.3.2).",
-                    evidence=f"Field name: '{f.name}', Type: {f.field_type}",
-                    page=f.page,
-                    bounding_box=f.bbox,
-                    object_reference=f"FormField '{f.name}'",
-                    custom_remediation="Open Form field properties in Acrobat Pro, go to General tab, and enter a helpful Tooltip."
-                ))
-        return results
-
 
 class WCAGCompatibleRule(BaseRule):
     rule_id = "WCAG-4.1"
@@ -737,55 +708,5 @@ class WCAGCompatibleRule(BaseRule):
                 custom_remediation="Remap inline custom tags to <Span> or appropriate inline standard structure types instead of <Sect>.",
                 items_count=len(questionable_mappings)
             ))
-
-        # PAC Parity: SC 4.1 aggregates basic ISO 32000-1 PDF syntax and structure tree hierarchy
-        if doc.is_tagged and doc.structure_tree and len(all_nodes) > 0:
-            total_nodes = len(all_nodes)
-            syntax_passed = _get_pdf_syntax_count(doc)
-
-            # Detect structure tree hierarchy nesting advisories dynamically matching PAC
-            warned_nodes = []
-            INADMISSIBLE_MAP = {
-                "LI": {"Document", "Part", "Art", "Sect", "Div", "P", "H", "H1", "H2", "H3", "H4", "H5", "H6", "Table", "L", "Span", "Link"},
-                "Table": {"Document", "Part", "Art", "Sect", "Div", "P", "H", "H1", "H2", "H3", "H4", "H5", "H6", "L", "Span", "Link", "TH", "TD"},
-                "TR": {"Document", "Part", "Art", "Sect", "Div", "P", "H", "H1", "H2", "H3", "H4", "H5", "H6", "Table", "L", "Span", "Link", "TR"},
-                "TH": {"Document", "Part", "Art", "Sect"},
-                "TD": {"Document", "Part", "Art", "Sect"},
-                "Caption": {"Document", "Part", "Art", "Sect", "Table", "L"},
-                "Note": {"Document", "Part", "Art", "Sect"}
-            }
-
-            def _find_nesting_advisories(node, parent):
-                if parent and parent.tag != "StructTreeRoot":
-                    p_std = parent.standard_tag or "Span"
-                    c_std = node.standard_tag or "Span"
-                    if p_std in INADMISSIBLE_MAP and c_std in INADMISSIBLE_MAP[p_std]:
-                        warned_nodes.append(node)
-                    elif (node.standard_tag or "").upper() == "FIGURE":
-                        raw_bbox = node.attributes.get("BBox") if node.attributes else None
-                        if not raw_bbox and not node.struct_bbox:
-                            warned_nodes.append(node)
-                for ch in node.children:
-                    _find_nesting_advisories(ch, node)
-
-            _find_nesting_advisories(doc.structure_tree, None)
-            struct_warned = len(warned_nodes)
-            struct_passed = max(0, total_nodes - struct_warned)
-
-            total_compat_passed = syntax_passed + struct_passed + 1  # includes StructTreeRoot
-            results.append(self.create_result(
-                status=CheckStatus.PASS,
-                message=f"{total_compat_passed} structure elements and PDF syntax structures conform to SC 4.1 compatibility requirements.",
-                evidence=f"Validated ISO 32000-1 syntax ({syntax_passed}) and structure tree nodes ({struct_passed}).",
-                items_count=total_compat_passed
-            ))
-            if struct_warned > 0:
-                results.append(self.create_result(
-                    status=CheckStatus.WARNING,
-                    message=f"{struct_warned} structure elements contain hierarchy nesting advisories (SC 4.1).",
-                    evidence=f"Structure tree nesting advisories on {struct_warned} elements.",
-                    custom_severity=Severity.LOW,
-                    items_count=struct_warned
-                ))
 
         return results

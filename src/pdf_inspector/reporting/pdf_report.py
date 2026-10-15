@@ -220,8 +220,7 @@ class PDFReportGenerator:
             w_c = counts['warned']
             f_c = counts['failed']
             m_c = counts['manual']
-            is_zero_fail = (cat == "2.3 Seizures and Physical Reactions" and f_c == 0)
-            f_display = f"<font color='#991b1b'><b>{f_c}</b></font>" if f_c else ("<font color='#64748b'>0</font>" if is_zero_fail else "<font color='#94a3b8'>-</font>")
+            f_display = f"<font color='#991b1b'><b>{f_c}</b></font>" if f_c else "<font color='#94a3b8'>-</font>"
             summary_rows.append([
                 Paragraph(sec_label, cell_style),
                 Paragraph(html.escape(cat), cell_style),

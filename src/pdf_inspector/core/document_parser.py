@@ -15,7 +15,8 @@ import pymupdf
 from .models import (
     PDFDocumentModel, PageModel, StructureNode, FontModel,
     ImageModel, TableModel, ListModel, LinkModel, FormFieldModel,
-    AnnotationModel, BookmarkModel, ArtifactOccurrenceModel, ContentOccurrenceModel
+    AnnotationModel, BookmarkModel, ArtifactOccurrenceModel, ContentOccurrenceModel,
+    FormXObjectModel
 )
 from .structure_tree import StructureTreeParser, resolve_role, parse_number_tree
 
@@ -655,10 +656,13 @@ class DocumentParser:
             seen_form_xrefs = set()
             try:
                 def process_form_xobject(xobj):
-                    og = getattr(xobj, "objgen", None)
-                    if not og or og in seen_form_xrefs:
+                    if not xobj:
                         return
-                    seen_form_xrefs.add(og)
+                    og = getattr(xobj, "objgen", None)
+                    ref_key = og if og is not None else id(xobj)
+                    if ref_key in seen_form_xrefs:
+                        return
+                    seen_form_xrefs.add(ref_key)
 
                     if isinstance(xobj, pikepdf.Stream) and xobj.get("/Subtype") == "/Form":
                         bbox_obj = xobj.get("/BBox")
@@ -692,9 +696,10 @@ class DocumentParser:
                         elif not matrix_valid:
                             err_msg = "Form XObject dictionary contains malformed /Matrix 6-element array."
 
+                        obj_num = og[0] if og else 0
                         form_xobjects.append(FormXObjectModel(
-                            id=f"Form_XObject_{og[0]}_{og[1]}",
-                            obj_num=og[0],
+                            id=f"Form_XObject_{og[0]}_{og[1]}" if og else f"Form_XObject_{id(xobj)}",
+                            obj_num=obj_num,
                             has_valid_bbox=has_valid_bbox,
                             bbox=parsed_bbox,
                             has_matrix=has_matrix,
@@ -704,17 +709,19 @@ class DocumentParser:
                             error_message=err_msg
                         ))
 
-                        if "/Resources" in xobj and "/XObject" in xobj.Resources:
+                        res = getattr(xobj, "resources", None) or xobj.get("/Resources")
+                        if res and "/XObject" in res:
                             try:
-                                for _, child_xo in xobj.Resources.XObject.items():
+                                for _, child_xo in res.XObject.items():
                                     process_form_xobject(child_xo)
                             except Exception:
                                 pass
 
                 for p in pike_doc.pages:
-                    if "/Resources" in p and "/XObject" in p.Resources:
+                    res = getattr(p, "resources", None) or p.get("/Resources")
+                    if res and "/XObject" in res:
                         try:
-                            for _, xo in p.Resources.XObject.items():
+                            for _, xo in res.XObject.items():
                                 process_form_xobject(xo)
                         except Exception:
                             pass
@@ -1106,16 +1113,24 @@ class DocumentParser:
             th_count = len(th_nodes)
             td_count = len(td_nodes)
             row_cols = []
+            active_rowspans: List[int] = []
             for tr in tr_nodes:
-                cells = [c for c in tr.children if c.standard_tag.upper() in ("TH", "TD")]
-                total_row_span = 0
+                cells = [c for c in tr.children if (c.standard_tag or "").upper() in ("TH", "TD")]
+                carried_over = sum(1 for span in active_rowspans if span > 1)
+                active_rowspans = [span - 1 for span in active_rowspans if span > 1]
+                total_row_span = carried_over
                 for cell in cells:
-                    colspan_val = cell.attributes.get("ColSpan", 1)
                     try:
-                        span = int(colspan_val)
+                        c_span = max(1, int(cell.attributes.get("ColSpan", 1)))
                     except Exception:
-                        span = 1
-                    total_row_span += max(1, span)
+                        c_span = 1
+                    try:
+                        r_span = max(1, int(cell.attributes.get("RowSpan", 1)))
+                    except Exception:
+                        r_span = 1
+                    total_row_span += c_span
+                    if r_span > 1:
+                        active_rowspans.extend([r_span] * c_span)
                 row_cols.append(total_row_span)
 
             cols_count = max(row_cols) if row_cols else 0

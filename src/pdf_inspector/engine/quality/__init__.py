@@ -15,6 +15,10 @@ from .quality_rules import (
     ArtifactedContentOnPageBodyRule,
     LinkCompletenessQualityRule,
     TaggedTextOnlyWhitespaceQualityRule,
+    DocumentTitleQualityRule,
+    BookmarksIfHeadingsQualityRule,
+    ListItemStructureQualityRule,
+    AlternativeTextValidityQualityRule,
 )
 
 QUALITY_RULES = [
@@ -26,16 +30,21 @@ QUALITY_RULES = [
     TOCIContainsLinkRule(),
     TOCILinkDestinationRule(),
     TextElementAltTextQualityRule(),
+    AlternativeTextValidityQualityRule(),
     NoteReferencedQualityRule(),
     NoteContainsLabelQualityRule(),
     ParagraphContainsNoteQualityRule(),
     ArtifactedContentOnPageBodyRule(),
     LinkCompletenessQualityRule(),
     TaggedTextOnlyWhitespaceQualityRule(),
+    DocumentTitleQualityRule(),
+    BookmarksIfHeadingsQualityRule(),
+    ListItemStructureQualityRule(),
 ]
 
 __all__ = [
     "QUALITY_RULES",
+    "AlternativeTextValidityQualityRule",
     "HeadingHierarchyQualityRule",
     "StructureQualityRule",
     "TableRegularityQualityRule",
@@ -50,4 +59,7 @@ __all__ = [
     "ArtifactedContentOnPageBodyRule",
     "LinkCompletenessQualityRule",
     "TaggedTextOnlyWhitespaceQualityRule",
+    "DocumentTitleQualityRule",
+    "BookmarksIfHeadingsQualityRule",
+    "ListItemStructureQualityRule",
 ]

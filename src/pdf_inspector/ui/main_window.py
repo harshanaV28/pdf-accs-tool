@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal, QObject, QEvent
 from PySide6.QtGui import QDragEnterEvent, QDropEvent, QIcon
 
-from ..core.models import PDFDocumentModel, AuditReport, CheckResult
+from ..core.models import PDFDocumentModel, AuditReport, CheckResult, CheckStatus
 from ..core.document_parser import DocumentParser
 from ..engine.runner import AuditRunner
 from ..reporting.pdf_report import PDFReportGenerator
@@ -463,17 +463,38 @@ class MainWindow(QMainWindow):
         self.right_panel.display_category_summary(standard, category, counts, cat_findings)
 
     def _on_checkpoint_category_selected(self, standard: str, category: str):
-        """User double clicked a checkpoint category in Checkpoints view; jump to Detailed Findings."""
+        """User clicked or selected a checkpoint category in Checkpoints view; jump to Detailed Findings."""
         if standard.upper() == "QUALITY":
             rule_ids = CheckpointsView.QUALITY_RULE_MAPPINGS.get(category, [])
-            self.detailed_view.filter_by_rule_ids(rule_ids, standard="All Standards", category_label=category)
+            self.detailed_view.filter_by_rule_ids(rule_ids, standard="Quality", category_label=category)
         else:
             self.detailed_view.filter_by_category(standard, category)
         self.sidebar.select_page("Detailed Findings")
 
+        if self.detailed_view.filtered_findings:
+            self.detailed_view.table.selectRow(0)
+            first_finding = self.detailed_view.filtered_findings[0]
+            self.right_panel.display_finding(first_finding)
+            if self.current_doc and first_finding.page:
+                target_page = first_finding.page or 1
+                self.pdf_viewer.go_to_page(
+                    target_page,
+                    first_finding.bounding_box,
+                    finding=first_finding,
+                    doc_model=self.current_doc
+                )
+
     def _on_finding_selected(self, finding: CheckResult):
-        """User clicked a finding in Detailed Findings table."""
+        """User clicked a finding in Detailed Findings table; display in right panel and navigate canvas to location."""
         self.right_panel.display_finding(finding)
+        if self.current_doc and finding and finding.page:
+            target_page = finding.page or 1
+            self.pdf_viewer.go_to_page(
+                target_page,
+                finding.bounding_box,
+                finding=finding,
+                doc_model=self.current_doc
+            )
 
     def _on_finding_double_clicked(self, finding: CheckResult):
         """User double clicked a finding; jump directly to page and highlight in PAC Visual Locator."""
