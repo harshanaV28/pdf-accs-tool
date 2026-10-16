@@ -411,19 +411,14 @@ class StructureTreeParser:
                     pass
 
         for sp_id, items in self.parent_tree_entries.items():
-            page_num = sp_to_page.get(sp_id, 1)
-            target_list = []
-            if isinstance(items, (pikepdf.Array, list)):
-                target_list = list(enumerate(items))
-            elif isinstance(items, (pikepdf.Dictionary, dict)):
-                target_list = list(items.items())
+            if sp_id not in sp_to_page:
+                continue
+            page_num = sp_to_page[sp_id]
+            if not isinstance(items, (pikepdf.Array, list)):
+                continue
 
-            for mcid, target in target_list:
+            for mcid_int, target in enumerate(items):
                 if target is None:
-                    continue
-                try:
-                    mcid_int = int(mcid)
-                except Exception:
                     continue
 
                 target_obj_num = getattr(target, "objgen", (None, None))[0] if hasattr(target, "objgen") else None

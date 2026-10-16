@@ -426,6 +426,7 @@ class PDFDocumentModel:
     has_parent_tree: bool = False
     parent_tree_valid: bool = False
     parent_tree_entries_count: int = 0
+    parent_tree_map: Dict[int, Any] = field(default_factory=dict)
     role_map: Dict[str, str] = field(default_factory=dict)
     pages: List[PageModel] = field(default_factory=list)
     structure_tree: Optional[StructureNode] = None

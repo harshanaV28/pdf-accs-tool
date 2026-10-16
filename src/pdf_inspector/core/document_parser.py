@@ -226,7 +226,30 @@ class DocumentParser:
             parent_tree_map: Dict[int, Any] = {}
             if "/StructTreeRoot" in pike_doc.Root and "/ParentTree" in pike_doc.Root["/StructTreeRoot"]:
                 try:
-                    parent_tree_map = parse_number_tree(pike_doc.Root["/StructTreeRoot"]["/ParentTree"])
+                    raw_pt = parse_number_tree(pike_doc.Root["/StructTreeRoot"]["/ParentTree"])
+                    for sp_id, val in raw_pt.items():
+                        if isinstance(val, (pikepdf.Array, list)):
+                            arr = []
+                            for item in val:
+                                if item is None or (isinstance(item, pikepdf.Object) and str(item) == "null"):
+                                    arr.append(None)
+                                elif isinstance(item, (pikepdf.Dictionary, dict)):
+                                    og = getattr(item, "objgen", (None, None))[0] if hasattr(item, "objgen") else None
+                                    s_tag = str(item.get("/S", "")).strip("/")
+                                    t_val = str(item.get("/Type", "")).strip("/")
+                                    has_p = bool(item.get("/P"))
+                                    arr.append({"obj_num": og, "tag": s_tag, "type": t_val, "has_parent": has_p})
+                                else:
+                                    arr.append({"obj_num": None, "tag": str(item), "type": "", "has_parent": False})
+                            parent_tree_map[sp_id] = arr
+                        elif isinstance(val, (pikepdf.Dictionary, dict)):
+                            og = getattr(val, "objgen", (None, None))[0] if hasattr(val, "objgen") else None
+                            parent_tree_map[sp_id] = {
+                                "obj_num": og,
+                                "tag": str(val.get("/S", "")).strip("/"),
+                                "type": str(val.get("/Type", "")).strip("/"),
+                                "has_parent": bool(val.get("/P"))
+                            }
                 except Exception as e:
                     logger.debug(f"Error parsing parent tree: {e}")
 
@@ -285,13 +308,10 @@ class DocumentParser:
                         tab_mode = str(pike_page["/Tabs"]).strip("/")
 
                     if "/StructParents" in pike_page:
-                        struct_parents_id = int(pike_page["/StructParents"])
-                        if struct_parents_id in parent_tree_map:
-                            pt_entry = parent_tree_map[struct_parents_id]
-                            if hasattr(pt_entry, "__len__"):
-                                for pt_idx, pt_val in enumerate(pt_entry):
-                                    if pt_val is not None and pt_idx not in mcids_found:
-                                        mcids_found.append(pt_idx)
+                        try:
+                            struct_parents_id = int(pike_page["/StructParents"])
+                        except Exception:
+                            struct_parents_id = None
 
                     # Also collect MCIDs from Form XObjects on this page
                     if "/Resources" in pike_page and "/XObject" in pike_page["/Resources"]:
@@ -604,9 +624,6 @@ class DocumentParser:
 
             for p in pages:
                 page_tree_mcids = tree_mcids_by_page.get(p.page_number, set())
-                for t_mcid in page_tree_mcids:
-                    if t_mcid not in p.mcids:
-                        p.mcids.append(t_mcid)
                 # Reconcile tagged_in_artifact_count:
                 # In PDF/UA (ISO 14289-1 7.1 / Matterhorn 01-004), content is only tagged if referenced in the structure tree.
                 real_tagged_in_art = [
@@ -775,6 +792,7 @@ class DocumentParser:
                 has_parent_tree=has_parent_tree,
                 parent_tree_valid=parent_tree_valid,
                 parent_tree_entries_count=parent_tree_entries_count,
+                parent_tree_map=parent_tree_map,
                 role_map=role_map,
                 pages=pages,
                 structure_tree=structure_tree,

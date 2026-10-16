@@ -252,3 +252,54 @@ class TestContentRegression:
         res_tagged = rule.evaluate(doc_tagged)
         assert any(r.status == CheckStatus.FAIL and r.page == 1 for r in res_tagged)
 
+    def test_mcid_reference_integrity_page_scoped(self):
+        """Tests that MCID reference checking is properly page-scoped and not fooled by identical MCIDs on different pages."""
+        rule = MCIDStructureReferenceRule()
+
+        # Page 1 has MCID 0 (referenced in StructTree). Page 2 also has MCID 0 (NOT referenced in StructTree).
+        node_p1 = StructureNode("p1", "P", "P", page=1, mcids=[0], mcid_entries=[(0, 1)])
+        root = StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[node_p1])
+
+        page1 = PageModel(page_number=1, width=600, height=800, mcids=[0])
+        page2 = PageModel(page_number=2, width=600, height=800, mcids=[0])
+
+        doc = PDFDocumentModel(
+            filepath="", filename="multipage_mcid.pdf", filesize=100, pdf_version="1.7",
+            page_count=2, is_tagged=True, structure_tree=root, pages=[page1, page2]
+        )
+        res = rule.evaluate(doc)
+        # Page 2 must be flagged as having orphan MCID 0 (Matterhorn 01-005)
+        fail_p2 = [r for r in res if r.status == CheckStatus.FAIL and r.page == 2]
+        assert len(fail_p2) >= 1
+        assert "Page 2 contains marked content MCID(s) [0]" in fail_p2[0].message
+
+    def test_parent_tree_integrity_mismatch_and_corrupt_entries(self):
+        """Tests ParentTreeIntegrityRule for Matterhorn 01-006 and 01-008."""
+        from src.pdf_inspector.engine.pdf_ua.parent_tree_rules import ParentTreeIntegrityRule
+        rule = ParentTreeIntegrityRule()
+
+        node = StructureNode("h1", "H1", "H1", page=1, obj_num=100, mcids=[0], mcid_entries=[(0, 1)])
+        root = StructureNode("root", "StructTreeRoot", "StructTreeRoot", children=[node])
+        page1 = PageModel(page_number=1, width=600, height=800, struct_parents_id=0, mcids=[0, 1])
+
+        # ParentTree:
+        # Index 0: Points to obj 200 (mismatch vs node.obj_num 100) -> Matterhorn 01-008
+        # Index 1: Corrupt dictionary with tag 'Artifact' -> Matterhorn 01-008
+        pt_map = {
+            0: [
+                {"obj_num": 200, "tag": "H1", "type": "StructElem", "has_parent": True},
+                {"obj_num": 300, "tag": "Artifact", "type": "", "has_parent": False}
+            ]
+        }
+        doc = PDFDocumentModel(
+            filepath="", filename="pt_corrupt.pdf", filesize=100, pdf_version="1.7",
+            page_count=1, is_tagged=True, structure_tree=root, pages=[page1],
+            has_parent_tree=True, parent_tree_valid=True, parent_tree_entries_count=1,
+            parent_tree_map=pt_map
+        )
+        res = rule.evaluate(doc)
+        fails = [r for r in res if r.status == CheckStatus.FAIL]
+        assert any("refers to MCID 0, but /ParentTree points to obj 200" in r.message for r in fails)
+        assert any("not a valid structure element (tag: 'Artifact')" in r.message for r in fails)
+
+

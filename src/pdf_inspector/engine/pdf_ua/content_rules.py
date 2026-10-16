@@ -49,7 +49,7 @@ class ContentTaggedRule(BaseRule):
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
         results = []
         total_unmarked = sum(p.unmarked_real_content_count for p in doc.pages) if doc.pages else 0
-        if not doc.is_tagged:
+        if not doc.is_tagged and doc.structure_tree is None:
             total_untagged = len(doc.images) + sum(len(p.text.splitlines()) for p in doc.pages if p.text.strip())
             if total_untagged > 0:
                 results.append(self.create_result(
@@ -151,7 +151,7 @@ class TaggedInsideArtifactRule(BaseRule):
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
         results = []
-        if not doc.is_tagged:
+        if not doc.is_tagged and doc.structure_tree is None:
             return results
 
         invalid_pages = []
@@ -190,38 +190,66 @@ class MCIDStructureReferenceRule(BaseRule):
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
         results = []
-        if not doc.is_tagged or not doc.structure_tree:
+        if not doc.structure_tree and not any(p.mcids for p in doc.pages):
             return results
 
-        # Collect all MCIDs referenced in the structure tree
-        tree_mcids: Set[int] = set()
-        all_nodes = doc.structure_tree.find_all_nodes()
+        # Collect all MCIDs referenced in the structure tree, indexed by page
+        tree_mcids_by_page: Dict[int, Set[int]] = {}
+        global_unassigned_mcids: Set[int] = set()
+
+        all_nodes = doc.structure_tree.find_all_nodes() if doc.structure_tree else []
         for node in all_nodes:
-            for mcid in node.mcids:
-                tree_mcids.add(mcid)
+            entries = getattr(node, "mcid_entries", [])
+            if entries:
+                for mcid, explicit_pg in entries:
+                    pg_num = explicit_pg or node.page
+                    if pg_num is not None:
+                        tree_mcids_by_page.setdefault(pg_num, set()).add(mcid)
+                    elif len(doc.pages) == 1:
+                        tree_mcids_by_page.setdefault(doc.pages[0].page_number, set()).add(mcid)
+                    else:
+                        global_unassigned_mcids.add(mcid)
+            elif node.mcids:
+                pg_num = node.page
+                if pg_num is not None:
+                    for mcid in node.mcids:
+                        tree_mcids_by_page.setdefault(pg_num, set()).add(mcid)
+                elif len(doc.pages) == 1:
+                    for mcid in node.mcids:
+                        tree_mcids_by_page.setdefault(doc.pages[0].page_number, set()).add(mcid)
+                elif node.pages_spanned:
+                    for pg_spanned in node.pages_spanned:
+                        for mcid in node.mcids:
+                            tree_mcids_by_page.setdefault(pg_spanned, set()).add(mcid)
+                else:
+                    for mcid in node.mcids:
+                        global_unassigned_mcids.add(mcid)
 
         # Check for orphan page MCIDs
         orphan_pages = []
         for p in doc.pages:
-            orphans = [mcid for mcid in p.mcids if mcid not in tree_mcids]
+            referenced = tree_mcids_by_page.get(p.page_number, set())
+            orphans = [mcid for mcid in p.mcids if mcid not in referenced and mcid not in global_unassigned_mcids]
             if orphans:
                 orphan_pages.append((p.page_number, orphans))
 
         if orphan_pages:
-            for pg_num, orphans in orphan_pages[:5]:
+            for pg_num, orphans in orphan_pages:
                 results.append(self.create_result(
                     status=CheckStatus.FAIL,
-                    message=f"Page {pg_num} contains marked content MCID(s) {orphans[:5]} not referenced by any structure element.",
+                    message=f"Page {pg_num} contains marked content MCID(s) {orphans[:10]} not referenced by any structure element (Matterhorn 01-005).",
                     evidence=f"Orphan MCIDs on page {pg_num}: {orphans}",
                     page=pg_num,
                     custom_severity=Severity.HIGH,
-                    custom_remediation="Ensure every /MCID in page content streams is referenced in the structure tree."
+                    custom_remediation="Associate orphan MCID marked content sequences with matching structure elements or mark them as Artifacts.",
+                    items_count=len(orphans)
                 ))
         else:
             results.append(self.create_result(
                 status=CheckStatus.PASS,
                 message="All marked-content identifiers (MCIDs) are properly referenced in the structure tree.",
-                evidence="MCID structure tree mapping verified."
+                evidence="MCID structure tree mapping verified.",
+                items_count=0
             ))
 
         return results
@@ -238,7 +266,7 @@ class StructureMCIDExistenceRule(BaseRule):
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
         results = []
-        if not doc.is_tagged or not doc.structure_tree:
+        if not doc.structure_tree:
             return results
 
         invalid_refs = []
@@ -251,48 +279,53 @@ class StructureMCIDExistenceRule(BaseRule):
                 for mcid, explicit_pg in entries:
                     pg_num = explicit_pg or node.page
                     if not pg_num:
+                        invalid_refs.append((node, mcid, "missing page"))
                         continue
                     page = next((p for p in doc.pages if p.page_number == pg_num), None)
                     if not page:
+                        invalid_refs.append((node, mcid, pg_num))
                         continue
                     if mcid not in page.mcids:
                         invalid_refs.append((node, mcid, pg_num))
             else:
                 pg_num = node.page
                 if not pg_num:
+                    for mcid in node.mcids:
+                        invalid_refs.append((node, mcid, "missing page"))
                     continue
                 page = next((p for p in doc.pages if p.page_number == pg_num), None)
-                if not page:
-                    continue
                 for mcid in node.mcids:
-                    if mcid not in page.mcids:
+                    if not page or mcid not in page.mcids:
                         invalid_refs.append((node, mcid, pg_num))
                     
         if invalid_refs:
-            for node, mcid, pg_num in invalid_refs[:5]:
+            for node, mcid, pg_num in invalid_refs[:10]:
                 results.append(self.create_result(
                     status=CheckStatus.FAIL,
-                    message=f"Structure element <{node.tag}> references MCID {mcid} which does not exist on page {pg_num}.",
+                    message=f"Structure element <{node.tag}> references MCID {mcid} which does not exist on page {pg_num} (Matterhorn 01-007).",
                     evidence=f"Invalid MCID reference: {mcid} on page {pg_num}",
-                    page=pg_num,
+                    page=pg_num if isinstance(pg_num, int) else None,
                     object_reference=f"<{node.tag}>",
                     custom_severity=Severity.HIGH,
-                    custom_remediation="Recreate tags or repair structure tree references."
+                    custom_remediation="Recreate tags or repair structure tree references.",
+                    items_count=1
                 ))
-            if len(invalid_refs) > 5:
-                rem = len(invalid_refs) - 5
+            if len(invalid_refs) > 10:
+                rem = len(invalid_refs) - 10
                 results.append(self.create_result(
                     status=CheckStatus.FAIL,
                     message=f"{rem} additional invalid MCID references found.",
                     evidence=f"Total invalid MCID refs: {len(invalid_refs)}",
                     custom_severity=Severity.HIGH,
-                    custom_remediation="Rebuild document structure tree."
+                    custom_remediation="Rebuild document structure tree.",
+                    items_count=rem
                 ))
         else:
             results.append(self.create_result(
                 status=CheckStatus.PASS,
                 message="All MCIDs referenced by the structure tree exist on their respective pages.",
-                evidence="Structure MCID references verified."
+                evidence="Structure MCID references verified.",
+                items_count=0
             ))
 
         return results
@@ -309,7 +342,7 @@ class NestedMarkedContentRule(BaseRule):
 
     def evaluate(self, doc: PDFDocumentModel) -> List[CheckResult]:
         results = []
-        if not doc.is_tagged:
+        if not doc.is_tagged and doc.structure_tree is None:
             return results
 
         nested_pages = []
